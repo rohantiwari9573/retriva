@@ -3,7 +3,11 @@
 The question-answering pipeline built on top of hybrid retrieval (see
 `docs/retrieval.md`): context construction, prompt design, the local LLM
 provider, citation validation, conversations, and what this phase does and
-does not claim about prompt-injection safety.
+does not claim about prompt-injection safety. This document covers the
+single-turn, non-streaming pipeline (`RAGService.ask()`,
+`POST /chat`) as built in Phase 5 - see `docs/streaming.md` for the
+multi-turn, streaming pipeline (`RAGService.ask_stream()`,
+`POST /chat/stream`) added in Phase 6, which reuses everything here.
 
 ## Pipeline
 

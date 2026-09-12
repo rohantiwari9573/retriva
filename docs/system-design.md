@@ -137,6 +137,22 @@ handful of concurrent chats. This mirrors the same "commit early, don't
 hold a transaction across slow I/O" principle Phase 3/4 established for
 storage failures and document processing.
 
+Retrieval (embedding the query, then vector + keyword search) runs in
+between those two commits and reads through the same session, which
+auto-begins a new transaction for those queries. That transaction is
+**rolled back** (not left open) immediately before the LLM call, for the
+same reason: nothing has been written yet, so there's nothing to commit,
+and rollback releases the pooled connection just as surely as commit would.
+Without this, the connection acquired for the retrieval queries would sit
+idle-in-transaction for the entire LLM generation - `retrieval_latency_ms`
+is typically tens of milliseconds, `llm_latency_ms` tens of seconds, so
+this is the difference between a connection held for milliseconds vs. one
+held for the bulk of the request. One consequence worth naming: `rollback()`
+expires every ORM object still attached to the session, so `RAGService`
+captures the values it needs (like the conversation id) as plain Python
+values *before* the rollback rather than re-reading them off an ORM object
+afterward.
+
 One consequence, made explicit rather than hidden: if the LLM call fails
 (LM Studio down, timeout), the user's question is still persisted - the
 conversation shows their message with no reply, not silently dropped. The

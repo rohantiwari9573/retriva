@@ -1,15 +1,15 @@
 # Nexus — AI Knowledge Platform
 
 Multi-tenant RAG platform for organizations to upload internal documents and ask
-questions against them, with hybrid retrieval and verified citations. Streaming
-answers land in a later conversational phase.
+questions against them, with hybrid retrieval, verified citations, and
+streaming multi-turn conversations.
 
-> **Status:** Phase 5 (retrieval-augmented Q&A: hybrid search, citations,
-> local LLM chat) complete. See `docs/rag.md` and `docs/retrieval.md` for
-> the full pipeline design, and `docs/architecture.md` /
-> `docs/system-design.md` for the system-wide view. This README covers
-> local setup and what's implemented so far; it grows into full project
-> documentation in Phase 12.
+> **Status:** Phase 6 (conversational RAG: query rewriting, SSE streaming,
+> regenerate) complete. See `docs/rag.md` and `docs/retrieval.md` for the
+> core RAG pipeline, `docs/streaming.md` for conversational RAG/streaming,
+> and `docs/architecture.md` / `docs/system-design.md` for the system-wide
+> view. This README covers local setup and what's implemented so far; it
+> grows into full project documentation in Phase 12.
 
 ## Implemented so far
 
@@ -46,11 +46,19 @@ answers land in a later conversational phase.
   retrieval doesn't find enough evidence, the system says so instead of
   guessing. Conversations persist and are organization-scoped. See
   `docs/rag.md` and `docs/retrieval.md`.
+- **Conversational RAG & streaming:** follow-up questions are rewritten
+  into standalone retrieval queries using conversation history (falling
+  back to the original question on any failure - never a source of
+  truth), answers stream token-by-token over Server-Sent Events with a
+  documented event protocol, and "stop generating"/"regenerate" are
+  supported without duplicating questions or holding a DB connection
+  during generation. See `docs/streaming.md`.
 - **Frontend:** `/login`, `/register`, `/dashboard`, `/documents`, `/chat`,
   `/settings/profile`, `/settings/organization`, `/settings/members` - all
   wired to the real backend, no mocked data. `/documents` polls while any
   document is `PROCESSING` and shows a retry action on `FAILED`. `/chat`
-  shows citations inline as clickable source chips with a detail panel.
+  streams answers live, shows citations inline as clickable source chips
+  with a detail panel, and supports stop/regenerate/copy on responses.
 
 ## Stack
 
@@ -120,7 +128,7 @@ backend/app/
   schemas/      # Pydantic request/response models
   services/     # business logic
   repositories/ # DB access, org-scoped queries
-  rag/          # embedding + llm providers (LM Studio + test doubles), retrieval, context builder, prompts, citations
+  rag/          # embedding + llm providers (LM Studio + test doubles, streaming), query rewriting, retrieval, context builder, prompts, citations, SSE event protocol
   ingestion/    # parsers, normalization, chunking, and the pipeline that ties them together
   evaluation/   # retrieval evaluation CLI + dataset (app/evaluation/retrieval.py)
   workers/      # Celery tasks (app/workers/tasks/document_processing.py)
@@ -128,7 +136,7 @@ backend/app/
 frontend/src/
   app/          # Next.js routes ((app) route group = authenticated shell, incl. /chat)
   components/   # ui, layout, organizations, documents, chat
-  hooks/        # TanStack Query hooks (use-auth, use-organizations, use-documents, use-chat, ...)
+  hooks/        # TanStack Query hooks (use-auth, use-organizations, use-documents, use-chat, ...) + use-chat-stream (SSE)
 ```
 
 ## Document upload design
@@ -178,8 +186,9 @@ frontend/src/
   a Nexus account; there's no email-based invite flow yet, and forgot-password
   is not implemented for the same reason (no SMTP/mail service configured).
 - No CSRF token beyond SameSite=Lax cookies + strict CORS origin allowlist.
-- No response streaming yet - the chat client waits for the full generation
-  (explicitly deferred to a later conversational phase per the Phase 5 spec).
+- True upstream cancellation at LM Studio is unverified when a client
+  disconnects mid-stream - only this project's own connection teardown is
+  (see `docs/streaming.md`).
 - No OCR - a scanned/image-only PDF with no text layer fails processing as
   an empty document, same as a genuinely empty file.
 - Token counts stored per chunk are an approximation (~4 chars/token), not
@@ -197,6 +206,9 @@ frontend/src/
 - Hard delete only for documents and conversations (no soft-delete/undo).
 - No per-document ACLs - any org member (VIEWER+) can see/download any
   document uploaded to that organization, or ask questions against it.
+- Query rewriting is judged by wiring/fallback tests and a small manual
+  evaluation dataset (`app/evaluation/conversational.py`), not a labeled
+  set of real conversational rewrites - see `docs/streaming.md`.
 
 ## Documentation
 
@@ -204,6 +216,8 @@ frontend/src/
 - [`docs/system-design.md`](docs/system-design.md) - data model and request lifecycles.
 - [`docs/rag.md`](docs/rag.md) - the RAG pipeline: context, prompts, citations, conversations.
 - [`docs/retrieval.md`](docs/retrieval.md) - hybrid search, score fusion, pgvector, FTS.
+- [`docs/streaming.md`](docs/streaming.md) - conversational RAG: query
+  rewriting, SSE streaming protocol, regenerate, cancellation behavior.
 - [`docs/document-ingestion.md`](docs/document-ingestion.md) - the Phase 4
   parsing/chunking/embedding pipeline, Celery task design, retry/idempotency
   behavior, and pgvector schema.

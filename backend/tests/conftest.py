@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from alembic import command
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, get_session_factory
 from app.main import app
 from app.rag.embedding.dependency import get_embedding_provider
 from app.rag.embedding.testing import DeterministicTestEmbeddingProvider
@@ -177,6 +177,12 @@ async def client(
             raise
 
     app.dependency_overrides[get_db] = _override_get_db
+    # The streaming chat route opens its own session via get_session_factory()
+    # instead of get_db() (see app/core/database.py's docstring for why) -
+    # without this override it would bind a real AsyncSessionLocal to the
+    # live test database, bypassing db_session's SAVEPOINT-based rollback
+    # entirely and leaking real rows across test runs.
+    app.dependency_overrides[get_session_factory] = lambda: _NoCloseSessionContext(db_session)
     app.dependency_overrides[get_storage_provider] = lambda: fake_storage
     # Without these, every chat-route test would try to reach a real LM
     # Studio instance and hang until LLM_REQUEST_TIMEOUT_SECONDS (120s).

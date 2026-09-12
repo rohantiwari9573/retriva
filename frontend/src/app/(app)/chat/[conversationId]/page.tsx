@@ -1,30 +1,47 @@
 "use client";
 
+import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
 
-import { AssistantThinkingBubble, MessageList, PendingUserBubble } from "@/components/chat/message-list";
+import {
+  AssistantThinkingBubble,
+  MessageList,
+  PendingUserBubble,
+  StreamingAssistantBubble,
+} from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useConversation, useSendMessage } from "@/hooks/use-chat";
+import { useConversation } from "@/hooks/use-chat";
+import { useChatStream } from "@/hooks/use-chat-stream";
 import { useCurrentOrganization } from "@/hooks/use-current-organization";
-import { ApiError } from "@/lib/api-client";
 
 export default function ConversationPage() {
   const { organization } = useCurrentOrganization();
   const { conversationId } = useParams<{ conversationId: string }>();
   const { data, isLoading } = useConversation(organization?.id ?? null, conversationId);
-  const sendMessage = useSendMessage(organization?.id ?? "");
+  const { active, error, send, regenerate, stop, dismissError } = useChatStream();
+
+  useEffect(() => {
+    if (error) {
+      toast.error(error.message);
+      dismissError();
+    }
+  }, [error, dismissError]);
+
+  const isStreamingHere = active !== null && active.conversationId === conversationId;
+  const lastMessage = data?.messages[data.messages.length - 1];
+  const canRegenerate = !active && lastMessage?.role === "ASSISTANT";
 
   const handleSend = (message: string) => {
-    sendMessage.mutate(
-      { conversationId, message },
-      {
-        onError: (error) => {
-          if (error instanceof ApiError) toast.error(error.message);
-        },
-      }
-    );
+    send(conversationId, message);
+  };
+
+  const handleRegenerate = () => {
+    const lastUserMessage = [...(data?.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === "USER");
+    if (lastUserMessage) regenerate(conversationId, lastUserMessage.content);
   };
 
   return (
@@ -37,17 +54,29 @@ export default function ConversationPage() {
           </div>
         ) : (
           <div className="mx-auto max-w-3xl">
-            <MessageList messages={data.messages} />
-            {sendMessage.isPending && (
+            <MessageList
+              messages={data.messages}
+              onRegenerate={canRegenerate ? handleRegenerate : undefined}
+            />
+            {isStreamingHere && (
               <div className="mt-4 space-y-4">
-                <PendingUserBubble content={sendMessage.variables?.message ?? ""} />
-                <AssistantThinkingBubble />
+                {!active.isRegenerate && <PendingUserBubble content={active.userMessage} />}
+                {active.tokens ? (
+                  <StreamingAssistantBubble text={active.tokens} />
+                ) : (
+                  <AssistantThinkingBubble />
+                )}
               </div>
             )}
           </div>
         )}
       </div>
-      <MessageInput onSend={handleSend} disabled={sendMessage.isPending || isLoading} />
+      <MessageInput
+        onSend={handleSend}
+        onStop={stop}
+        disabled={!!active || isLoading}
+        isStreaming={isStreamingHere}
+      />
     </>
   );
 }

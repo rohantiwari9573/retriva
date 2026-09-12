@@ -8,21 +8,29 @@ one-off org_id read from the request body.
 """
 
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.deps import OrgContext, get_org_context, require_role
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, get_session_factory
+from app.core.exceptions import AppError, NotFoundError
+from app.core.logging import get_logger
 from app.core.rate_limit import rate_limit
-from app.models.enums import OrgRole
+from app.models.enums import MessageRole, OrgRole
 from app.rag.embedding.base import EmbeddingProvider
 from app.rag.embedding.dependency import get_embedding_provider
 from app.rag.llm.base import LLMProvider
 from app.rag.llm.dependency import get_llm_provider
+from app.rag.query_rewrite.dependency import get_query_rewriter
 from app.rag.retrieval.hybrid import HybridRetriever
+from app.rag.streaming_events import ErrorEvent, format_sse
+from app.repositories.conversation_repository import ConversationRepository
+from app.repositories.message_repository import MessageRepository
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -38,6 +46,8 @@ from app.schemas.chat import (
 )
 from app.services.conversation_service import ConversationService
 from app.services.rag_service import RAGService
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -69,6 +79,153 @@ async def chat(
         retrieval=RetrievalMeta(
             chunks_considered=result.chunks_considered, chunks_used=result.chunks_used
         ),
+    )
+
+
+@router.post(
+    "/{organization_id}/chat/stream",
+    dependencies=[Depends(rate_limit("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
+)
+async def chat_stream(
+    body: ChatRequest,
+    ctx: OrgContext = Depends(get_org_context),  # VIEWER+ may ask, per RBAC design
+    db: AsyncSession = Depends(get_db),
+    embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
+    llm_provider: LLMProvider = Depends(get_llm_provider),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+) -> StreamingResponse:
+    """SSE counterpart to POST /chat - see docs/streaming.md for the event
+    protocol. Kept as a separate endpoint rather than changing /chat's
+    contract: existing clients of the non-streaming endpoint are
+    unaffected, and the two have genuinely different response shapes
+    (a single JSON body vs. an event stream).
+
+    Auth/org membership/conversation ownership are all resolved BEFORE the
+    stream starts (using this request's normal `db` session, torn down
+    when this function returns) - once the 200 + text/event-stream headers
+    are sent, an HTTP error response is no longer possible, so anything
+    that should be a real 404/403 must be checked here, not inside the
+    generator. The generator itself opens its own session via
+    session_factory rather than depending on `db`: a yield-dependency like
+    get_db is torn down as soon as this function returns, which happens as
+    soon as the StreamingResponse object is constructed - long before the
+    generator body (which runs during response streaming, after this
+    function has already returned) does its DB writes. See
+    get_session_factory()'s docstring for why this needs its own
+    dependency rather than reading app.core.database.AsyncSessionLocal
+    directly (test isolation).
+    """
+    if not settings.STREAMING_ENABLED:
+        raise AppError(
+            "Streaming responses are disabled on this deployment.",
+            code="STREAMING_DISABLED",
+            status_code=503,
+        )
+
+    organization_id = ctx.organization.id
+    user_id = ctx.membership.user_id
+    conversation_id = body.conversation_id
+    question = body.message
+
+    if conversation_id is not None:
+        # Resolved here (not inside ask_stream()) purely so a cross-tenant
+        # or nonexistent conversation id produces a normal 404 JSON
+        # response instead of an in-stream error event.
+        conversation = await ConversationRepository(db).get_by_id_in_org(
+            conversation_id, organization_id
+        )
+        if conversation is None:
+            raise NotFoundError("Conversation not found.", code="CONVERSATION_NOT_FOUND")
+
+    async def event_stream() -> AsyncIterator[str]:
+        async with session_factory() as stream_db:
+            query_rewriter = get_query_rewriter(llm_provider)
+            service = RAGService(stream_db, embedding_provider, llm_provider, query_rewriter)
+            try:
+                async for event in service.ask_stream(
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    question=question,
+                ):
+                    yield format_sse(event)
+            except Exception as exc:
+                # Anything that escapes ask_stream() here is a bug, not an
+                # expected failure mode (those are already turned into
+                # ErrorEvents inside ask_stream()) - logged with the real
+                # exception, reported to the client as a generic error
+                # rather than leaking internals.
+                logger.error("chat_stream_unhandled_error", exc_info=exc)
+                yield format_sse(
+                    ErrorEvent(code="INTERNAL_ERROR", message="An unexpected error occurred.")
+                )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/{organization_id}/conversations/{conversation_id}/regenerate",
+    dependencies=[Depends(rate_limit("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
+)
+async def regenerate_chat_stream(
+    conversation_id: uuid.UUID,
+    ctx: OrgContext = Depends(get_org_context),  # VIEWER+ may ask, per RBAC design
+    db: AsyncSession = Depends(get_db),
+    embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
+    llm_provider: LLMProvider = Depends(get_llm_provider),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+) -> StreamingResponse:
+    """SSE regenerate: reruns retrieval + generation for the conversation's
+    most recent user question and appends a NEW assistant message - it
+    never duplicates the question or deletes the previous answer. Same
+    session-lifecycle reasoning as chat_stream() above. See
+    docs/streaming.md and RAGService.regenerate_stream()."""
+    if not settings.STREAMING_ENABLED:
+        raise AppError(
+            "Streaming responses are disabled on this deployment.",
+            code="STREAMING_DISABLED",
+            status_code=503,
+        )
+
+    organization_id = ctx.organization.id
+
+    conversation = await ConversationRepository(db).get_by_id_in_org(
+        conversation_id, organization_id
+    )
+    if conversation is None:
+        raise NotFoundError("Conversation not found.", code="CONVERSATION_NOT_FOUND")
+    last_user_message = await MessageRepository(db).get_last_by_role(
+        conversation_id, role=MessageRole.USER
+    )
+    if last_user_message is None:
+        raise NotFoundError(
+            "This conversation has no question to regenerate an answer for.",
+            code="NO_MESSAGE_TO_REGENERATE",
+        )
+
+    async def event_stream() -> AsyncIterator[str]:
+        async with session_factory() as stream_db:
+            query_rewriter = get_query_rewriter(llm_provider)
+            service = RAGService(stream_db, embedding_provider, llm_provider, query_rewriter)
+            try:
+                async for event in service.regenerate_stream(
+                    organization_id=organization_id, conversation_id=conversation_id
+                ):
+                    yield format_sse(event)
+            except Exception as exc:
+                logger.error("chat_regenerate_unhandled_error", exc_info=exc)
+                yield format_sse(
+                    ErrorEvent(code="INTERNAL_ERROR", message="An unexpected error occurred.")
+                )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

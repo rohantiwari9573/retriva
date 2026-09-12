@@ -131,11 +131,21 @@ async def test_ask_with_no_documents_returns_insufficient_evidence_without_calli
 
 async def test_ask_reuses_existing_conversation_and_includes_history(db_session):
     org, chunk, user_id = await _seed_org_with_document(db_session)
+    # Captured before the first ask() call: RAGService.ask() rolls back the
+    # session's transaction before calling the LLM (to release the pooled
+    # connection during generation - see rag_service.py), which expires
+    # every ORM object still attached to this session, `org` included.
+    # Reading org.id again after that would trigger a lazy reload outside an
+    # awaited context. A real caller never hits this - route handlers
+    # resolve org context to plain values before invoking RAGService - this
+    # is purely an artifact of this test reusing one ORM object across two
+    # `ask()` calls on the same session.
+    org_id = org.id
     stub_llm = StubLLMProvider()
     service = RAGService(db_session, EMBED, stub_llm)
 
     first = await service.ask(
-        organization_id=org.id,
+        organization_id=org_id,
         user_id=user_id,
         conversation_id=None,
         question=CHUNK_CONTENT,
@@ -145,7 +155,7 @@ async def test_ask_reuses_existing_conversation_and_includes_history(db_session)
     # cannot resolve semantically (see module docstring above); this test's
     # purpose is to prove history threading, not retrieval robustness.
     second = await service.ask(
-        organization_id=org.id,
+        organization_id=org_id,
         user_id=user_id,
         conversation_id=first.conversation_id,
         question=CHUNK_CONTENT,
@@ -250,6 +260,36 @@ async def test_embedding_unavailable_raises_clear_error(db_session):
             conversation_id=None,
             question="What is the annual leave allowance?",
         )
+
+
+async def test_ask_releases_db_transaction_before_calling_llm(db_session):
+    # A local LLM generation can take 30-120s; RAGService must not hold the
+    # SQLAlchemy transaction (and the pooled connection behind it) open for
+    # that whole span, or a handful of concurrent chats would exhaust
+    # DB_POOL_SIZE. Regression test for that fix.
+    org, chunk, user_id = await _seed_org_with_document(db_session)
+
+    class _TransactionProbeLLMProvider:
+        model = "probe"
+
+        def __init__(self) -> None:
+            self.was_in_transaction: bool | None = None
+
+        async def generate(self, messages, *, max_tokens=None) -> str:
+            self.was_in_transaction = db_session.in_transaction()
+            return "Based on the provided documents. [SOURCE-1]"
+
+    probe = _TransactionProbeLLMProvider()
+    service = RAGService(db_session, EMBED, probe)
+
+    await service.ask(
+        organization_id=org.id,
+        user_id=user_id,
+        conversation_id=None,
+        question=CHUNK_CONTENT,
+    )
+
+    assert probe.was_in_transaction is False
 
 
 async def test_conversation_history_message_role_mapping():

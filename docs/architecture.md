@@ -158,6 +158,7 @@ current design scales indefinitely:
   abstraction is what would let a real deployment swap in a
   properly-scaled self-hosted inference server (vLLM, TGI) or a paid API
   behind the same interface, without touching `RAGService`.
-- **No response streaming** (explicitly deferred per the Phase 5 spec to a
-  later "conversational" phase) means the client waits for the full
-  generation - acceptable for evaluation, not for a polished product.
+- **Response streaming** (Phase 6, see `docs/streaming.md`) still shares
+  the same single-LM-Studio-instance ceiling above - a stream just makes
+  the wait latency-hidden (tokens render incrementally) rather than
+  removing the underlying one-generation-at-a-time constraint.

@@ -1,39 +1,53 @@
 "use client";
 
+import { useEffect } from "react";
 import { MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import { AssistantThinkingBubble, PendingUserBubble } from "@/components/chat/message-list";
+import {
+  AssistantThinkingBubble,
+  PendingUserBubble,
+  StreamingAssistantBubble,
+} from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
-import { useCurrentOrganization } from "@/hooks/use-current-organization";
-import { useSendMessage } from "@/hooks/use-chat";
-import { ApiError } from "@/lib/api-client";
+import { useChatStream } from "@/hooks/use-chat-stream";
 
 export default function NewChatPage() {
-  const { organization } = useCurrentOrganization();
   const router = useRouter();
-  const sendMessage = useSendMessage(organization?.id ?? "");
+  const { active, error, send, stop, dismissError } = useChatStream();
+
+  // Redirect to the real conversation URL as soon as message_start resolves
+  // its id - the ChatStreamProvider lives above this page in the layout, so
+  // the in-flight stream keeps running and renders on the destination page.
+  useEffect(() => {
+    if (active?.conversationId && !active.isRegenerate) {
+      router.replace(`/chat/${active.conversationId}`);
+    }
+  }, [active?.conversationId, active?.isRegenerate, router]);
+
+  useEffect(() => {
+    if (error) {
+      toast.error(error.message);
+      dismissError();
+    }
+  }, [error, dismissError]);
 
   const handleSend = (message: string) => {
-    sendMessage.mutate(
-      { conversationId: null, message },
-      {
-        onSuccess: (data) => router.push(`/chat/${data.conversation_id}`),
-        onError: (error) => {
-          if (error instanceof ApiError) toast.error(error.message);
-        },
-      }
-    );
+    send(null, message);
   };
 
   return (
     <>
       <div className="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto p-6">
-        {sendMessage.isPending ? (
+        {active ? (
           <div className="w-full max-w-2xl space-y-4">
-            <PendingUserBubble content={sendMessage.variables?.message ?? ""} />
-            <AssistantThinkingBubble />
+            <PendingUserBubble content={active.userMessage} />
+            {active.tokens ? (
+              <StreamingAssistantBubble text={active.tokens} />
+            ) : (
+              <AssistantThinkingBubble />
+            )}
           </div>
         ) : (
           <div className="text-center text-muted-foreground">
@@ -45,7 +59,7 @@ export default function NewChatPage() {
           </div>
         )}
       </div>
-      <MessageInput onSend={handleSend} disabled={sendMessage.isPending} />
+      <MessageInput onSend={handleSend} onStop={stop} disabled={!!active} isStreaming={!!active} />
     </>
   );
 }

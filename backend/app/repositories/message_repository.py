@@ -48,6 +48,21 @@ class MessageRepository:
         )
         return list(result.scalars())
 
+    async def get_last_by_role(
+        self, conversation_id: uuid.UUID, *, role: MessageRole
+    ) -> Message | None:
+        """Most recent message of the given role in the conversation, by
+        `sequence` (see list_recent_before's docstring for why not
+        `created_at`) - used by RAGService.regenerate_stream() to find the
+        question a regenerate request re-answers."""
+        result = await self.db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id, Message.role == role)
+            .order_by(Message.sequence.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_recent_before(
         self, conversation_id: uuid.UUID, *, before: Message, limit: int
     ) -> list[Message]:

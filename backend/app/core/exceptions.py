@@ -78,9 +78,44 @@ class LLMUnavailableError(AppError):
     code = "LLM_UNAVAILABLE"
 
 
+class LLMTimeoutError(AppError):
+    """The LLM backend didn't respond within the configured timeout, before
+    producing any output - distinct from LLMUnavailableError (backend
+    refused/unreachable) so a client (or the SSE error event, in the
+    streaming path) can tell "try again, it might just be slow" apart from
+    "something is actually broken"."""
+
+    status_code = status.HTTP_504_GATEWAY_TIMEOUT
+    code = "LLM_TIMEOUT"
+
+
 class EmbeddingUnavailableError(AppError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = "EMBEDDING_UNAVAILABLE"
+
+
+class LLMStreamInterruptedError(AppError):
+    """A streaming generation had already produced output when it broke
+    (connection lost, malformed chunk) - distinct from LLMUnavailableError,
+    which means the backend was never reached at all. Only ever surfaced as
+    an SSE `error` event (see app/rag/streaming_events.py), never as a JSON
+    response - by the time this can occur, the stream has already started
+    and the normal HTTP-error-response path is no longer available."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "LLM_STREAM_INTERRUPTED"
+
+
+class RetrievalFailedError(AppError):
+    """Retrieval failed for a reason other than the embedding backend being
+    unavailable (e.g. the database was unreachable mid-query). Deliberately
+    distinct from EmbeddingUnavailableError and from the "insufficient
+    evidence" answer - those are two different system states that must
+    never be conflated: one is a real failure, the other is a normal answer
+    meaning "retrieval worked but found nothing relevant"."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "RETRIEVAL_FAILED"
 
 
 class StorageObjectNotFoundError(StorageError):

@@ -118,6 +118,19 @@ class Settings(BaseSettings):
     MAX_CONTEXT_CHUNKS: int = 6
     CONVERSATION_HISTORY_MAX_MESSAGES: int = 6
 
+    # --- Conversational RAG (Phase 6) ---
+    # Query rewriting is an optimization on top of retrieval, never its
+    # source of truth - if it's disabled, times out, or fails, the original
+    # question is used for retrieval unchanged. See app/rag/query_rewrite/.
+    QUERY_REWRITE_ENABLED: bool = True
+    # Deliberately much shorter than LLM_REQUEST_TIMEOUT_SECONDS: a slow
+    # rewrite should fall back to the original query almost immediately,
+    # not make the user wait through the same 120s budget as the real
+    # answer generation before retrieval even starts.
+    QUERY_REWRITE_TIMEOUT_SECONDS: float = 10.0
+    QUERY_REWRITE_MAX_TOKENS: int = 100
+    STREAMING_ENABLED: bool = True
+
     # --- Rate limiting (requests per window per identity) ---
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
     RATE_LIMIT_REGISTER_PER_MINUTE: int = 3

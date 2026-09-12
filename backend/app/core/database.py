@@ -32,6 +32,24 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """A callable that opens a fresh, independently-committing session -
+    for code that must NOT tie its session lifetime to a single request/
+    response dependency scope, most importantly a StreamingResponse
+    generator: a yield-dependency like get_db() is torn down as soon as the
+    route handler function returns, which happens as soon as the
+    StreamingResponse object is constructed - before the generator body
+    (which runs later, while the response streams) has done any of its own
+    DB work. See app/api/v1/chat.py's chat_stream() for the concrete case,
+    and app/workers/tasks/document_processing.py for the same "own
+    session/engine, not the request-scoped one" pattern used by Celery
+    tasks. Tests override this dependency with a wrapper around the
+    per-test db_session (see tests/conftest.py's pipeline_session_factory)
+    so streaming route tests still run inside the test's rolled-back
+    transaction instead of writing to the real test database."""
+    return AsyncSessionLocal
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Per-request session with unit-of-work semantics: commits if the route
     completed without raising, rolls back otherwise. Routes/services never
