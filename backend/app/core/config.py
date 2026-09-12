@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "http://localhost:1234/v1"
     LLM_API_KEY: str = "not-needed-for-local"
     LLM_MODEL: str = "qwen2.5-7b-instruct"
+    # Local CPU/GPU chat generation on a developer machine routinely takes
+    # 30-120s, unlike the sub-second embedding calls above - a short timeout
+    # here would misreport a working-but-slow LM Studio as "unavailable".
+    LLM_REQUEST_TIMEOUT_SECONDS: int = 120
 
     EMBEDDING_PROVIDER: Literal["openai_compatible"] = "openai_compatible"
     EMBEDDING_BASE_URL: str = "http://localhost:1234/v1"
@@ -97,6 +101,22 @@ class Settings(BaseSettings):
     # --- Document processing (Celery) ---
     DOCUMENT_PROCESSING_MAX_RETRIES: int = 3
     DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS: int = 10
+
+    # --- Hybrid retrieval (Phase 5) ---
+    # Fusion is Reciprocal Rank Fusion (RRF), not a weighted sum of raw scores -
+    # vector cosine similarity and Postgres ts_rank live on incompatible
+    # scales, so combining them by rank rather than by (mis-normalized) value
+    # is the mathematically defensible choice. See docs/retrieval.md.
+    VECTOR_SEARCH_WEIGHT: float = 0.7
+    KEYWORD_SEARCH_WEIGHT: float = 0.3
+    RRF_K: int = 60
+    # Applied to raw cosine similarity (1 - cosine distance) of the single
+    # best vector hit, not to the fused RRF score - RRF scores aren't on a
+    # meaningful absolute scale. A heuristic, not a calibrated probability;
+    # see docs/retrieval.md for why and its limitations.
+    RETRIEVAL_MIN_SIMILARITY: float = 0.3
+    MAX_CONTEXT_CHUNKS: int = 6
+    CONVERSATION_HISTORY_MAX_MESSAGES: int = 6
 
     # --- Rate limiting (requests per window per identity) ---
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5

@@ -33,7 +33,10 @@ from alembic import command
 from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
+from app.rag.embedding.dependency import get_embedding_provider
 from app.rag.embedding.testing import DeterministicTestEmbeddingProvider
+from app.rag.llm.dependency import get_llm_provider
+from app.rag.llm.testing import StubLLMProvider
 from app.storage.dependency import get_storage_provider
 from app.storage.memory import InMemoryStorageProvider
 
@@ -120,6 +123,16 @@ def fake_embedding_provider() -> DeterministicTestEmbeddingProvider:
     return DeterministicTestEmbeddingProvider(dimensions=settings.EMBEDDING_DIMENSIONS)
 
 
+@pytest.fixture
+def fake_llm_provider() -> StubLLMProvider:
+    # No live LM Studio in CI - chat/RAG integration tests run against this
+    # deterministic stub, which echoes back whatever [SOURCE-N] tags it was
+    # given (see app/rag/llm/testing.py). Good enough to test citation
+    # validation and the full pipeline wiring; it proves nothing about real
+    # language-model answer quality or instruction-following.
+    return StubLLMProvider()
+
+
 class _NoCloseSessionContext:
     """Wraps an already-open test session so it can be handed to code that
     expects an async_sessionmaker-shaped callable (`session_factory()` used
@@ -147,7 +160,10 @@ def pipeline_session_factory(db_session: AsyncSession) -> _NoCloseSessionContext
 
 @pytest.fixture
 async def client(
-    db_session: AsyncSession, fake_storage: InMemoryStorageProvider
+    db_session: AsyncSession,
+    fake_storage: InMemoryStorageProvider,
+    fake_embedding_provider: DeterministicTestEmbeddingProvider,
+    fake_llm_provider: StubLLMProvider,
 ) -> AsyncGenerator[AsyncClient, None]:
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
         # Mirrors app.core.database.get_db's commit/rollback-per-request
@@ -162,6 +178,10 @@ async def client(
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_storage_provider] = lambda: fake_storage
+    # Without these, every chat-route test would try to reach a real LM
+    # Studio instance and hang until LLM_REQUEST_TIMEOUT_SECONDS (120s).
+    app.dependency_overrides[get_embedding_provider] = lambda: fake_embedding_provider
+    app.dependency_overrides[get_llm_provider] = lambda: fake_llm_provider
     # raise_app_exceptions=False: match real deployment behavior, where an
     # unhandled exception becomes the generic-Exception handler's 500 JSON
     # response, not a Python exception escaping to the caller. Without this,

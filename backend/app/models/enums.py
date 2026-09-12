@@ -33,3 +33,8 @@ class DocumentStatus(enum.StrEnum):
     # unused by Phase 3, which hard-deletes rows on removal - kept for a
     # later phase that might switch to soft-delete for audit/undo purposes.
     DELETED = "DELETED"
+
+
+class MessageRole(enum.StrEnum):
+    USER = "USER"
+    ASSISTANT = "ASSISTANT"

@@ -1,0 +1,12 @@
+[
+  {
+    "question": "What is the annual leave allowance?",
+    "expected_document_name": "Employee Handbook",
+    "expected_content_substring": "24 days"
+  },
+  {
+    "question": "What do I need to return when I leave the company?",
+    "expected_document_name": "Employee Handbook",
+    "expected_content_substring": "equipment"
+  }
+]

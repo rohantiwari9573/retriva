@@ -73,6 +73,16 @@ class ProcessingQueueError(AppError):
     code = "PROCESSING_QUEUE_UNAVAILABLE"
 
 
+class LLMUnavailableError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "LLM_UNAVAILABLE"
+
+
+class EmbeddingUnavailableError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "EMBEDDING_UNAVAILABLE"
+
+
 class StorageObjectNotFoundError(StorageError):
     """The storage key doesn't resolve to an object. Distinct from a generic
     StorageError because it's a permanent condition (the row's storage_key is

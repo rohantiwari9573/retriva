@@ -55,3 +55,54 @@ export type DocumentListResponse = {
   page: number;
   page_size: number;
 };
+
+export type MessageRole = "USER" | "ASSISTANT";
+
+export type Citation = {
+  id: string;
+  document_id: string;
+  document_name: string;
+  chunk_id: string;
+  page: number | null;
+  section: string | null;
+  excerpt: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  role: MessageRole;
+  content: string;
+  citations: Citation[] | null;
+  chunks_considered: number | null;
+  chunks_used: number | null;
+  created_at: string;
+};
+
+export type ChatResponse = {
+  conversation_id: string;
+  message_id: string;
+  answer: string;
+  citations: Citation[];
+  retrieval: {
+    chunks_considered: number;
+    chunks_used: number;
+  };
+};
+
+export type Conversation = {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConversationDetail = Conversation & {
+  messages: ChatMessage[];
+};
+
+export type ConversationListResponse = {
+  items: Conversation[];
+  total: number;
+  page: number;
+  page_size: number;
+};

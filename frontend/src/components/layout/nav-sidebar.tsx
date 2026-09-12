@@ -1,15 +1,16 @@
 "use client";
 
-import { FileText, LayoutDashboard, Settings, UsersRound } from "lucide-react";
+import { FileText, LayoutDashboard, MessageSquare, Settings, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
-// Chat and admin nav entries land in later phases once those pages exist -
-// a link to a route that 404s is worse than no link.
+// The admin/analytics nav entry lands in a later phase once that page
+// exists - a link to a route that 404s is worse than no link.
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/settings/organization", label: "Organization", icon: Settings },
   { href: "/settings/members", label: "Members", icon: UsersRound },
