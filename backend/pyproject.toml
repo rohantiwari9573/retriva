@@ -48,6 +48,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# B008: FastAPI's Depends()-as-default is the framework's idiomatic DI pattern,
+# not the "mutable default argument" bug this rule targets.
+ignore = ["B008"]
 
 [tool.mypy]
 python_version = "3.12"

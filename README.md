@@ -3,9 +3,26 @@
 Multi-tenant RAG platform for organizations to upload internal documents and ask
 questions against them, with citations, hybrid retrieval, and streaming answers.
 
-> **Status:** Phase 1 (scaffolding) complete. See `docs/` for architecture and
-> system design once later phases land. This README will grow into full project
-> documentation in Phase 12 — for now it covers local setup only.
+> **Status:** Phase 2 (auth, organizations, RBAC) complete. See `docs/` for
+> architecture and system design once later phases land. This README will grow
+> into full project documentation in Phase 12 — for now it covers local setup
+> and what's implemented so far.
+
+## Implemented so far
+
+- **Auth:** registration, login, logout, refresh-token rotation with theft
+  detection, HTTP-only cookie sessions, rate limiting on login/register.
+- **Multi-tenancy:** organizations, memberships, org switching. Every
+  org-scoped endpoint requires proven membership - a 404 (not 403) is returned
+  for both "doesn't exist" and "not your org," so org existence is never
+  leaked to outsiders.
+- **RBAC:** OWNER/ADMIN/MEMBER/VIEWER hierarchy enforced server-side via
+  FastAPI dependencies (`app/api/v1/deps.py`), never trusting client-supplied
+  role claims. Last-owner protection prevents an org from being locked out of
+  admin access.
+- **Frontend:** `/login`, `/register`, `/dashboard`, `/settings/profile`,
+  `/settings/organization`, `/settings/members` - all wired to the real
+  backend, no mocked data.
 
 ## Stack
 
@@ -72,9 +89,37 @@ backend/app/
   workers/      # Celery tasks
   storage/      # S3/MinIO abstraction
 frontend/src/
-  app/          # Next.js routes
-  components/   # ui, layout, chat, documents, dashboard, settings
+  app/          # Next.js routes ((app) route group = authenticated shell)
+  components/   # ui, layout, organizations (chat, documents land in later phases)
+  hooks/        # TanStack Query hooks (use-auth, use-organizations, use-members)
 ```
+
+## Authentication & authorization design
+
+- **Sessions:** access token (JWT, 15 min) + refresh token (opaque random
+  string, 30 days) as separate HTTP-only, SameSite=Lax cookies. Tokens never
+  touch frontend JavaScript; the frontend calls `GET /api/v1/users/me` to
+  learn its own auth state.
+- **Refresh rotation:** every refresh issues a new token and revokes the old
+  one. If a revoked token is ever presented again (a stolen-and-replayed
+  cookie), the server treats it as compromise and revokes every session for
+  that user, not just the one token.
+- **Tenant isolation:** enforced at the service/repository layer via a
+  mandatory membership lookup (`app/api/v1/deps.py::get_org_context`) - not
+  Postgres row-level security (documented as a future defense-in-depth option
+  in `docs/security.md` once that's written in Phase 12). A user with no
+  membership row for an org gets 404, identical to the org not existing.
+- **RBAC:** role hierarchy (`OWNER > ADMIN > MEMBER > VIEWER`) checked via
+  `require_role()`, applied per-route, never inferred from client input.
+
+## Known limitations (Phase 2)
+
+- No email delivery - "adding a member" requires the invitee to already have
+  a Nexus account; there's no email-based invite flow yet, and forgot-password
+  is not implemented for the same reason (no SMTP/mail service configured).
+- No CSRF token beyond SameSite=Lax cookies + strict CORS origin allowlist.
+- Documents, conversations, RAG, and admin panel don't exist yet - see the
+  phased plan below.
 
 ## Documentation
 

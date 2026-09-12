@@ -13,8 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 
-_DbDependency = Depends(get_db)
-
 router = APIRouter(tags=["health"])
 
 
@@ -29,7 +27,7 @@ async def liveness() -> dict[str, str]:
 
 
 @router.get("/readiness")
-async def readiness(response: Response, db: AsyncSession = _DbDependency) -> dict[str, object]:
+async def readiness(response: Response, db: AsyncSession = Depends(get_db)) -> dict[str, object]:
     checks: dict[str, str] = {}
     healthy = True
 

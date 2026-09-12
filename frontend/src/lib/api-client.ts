@@ -5,11 +5,18 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+export type ValidationDetail = {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
-    message: string
+    message: string,
+    public details?: ValidationDetail[]
   ) {
     super(message);
   }
@@ -29,7 +36,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     const body = await response.json().catch(() => null);
     const code = body?.error?.code ?? "UNKNOWN_ERROR";
     const message = body?.error?.message ?? "Something went wrong. Please try again.";
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(response.status, code, message, body?.error?.details);
   }
 
   if (response.status === 204) {

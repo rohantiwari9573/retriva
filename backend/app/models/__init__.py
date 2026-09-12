@@ -1,6 +1,12 @@
 """SQLAlchemy ORM models.
 
 Each model module is imported here so Alembic autogenerate and Base.metadata see
-every table. Populated starting Phase 2 (users/organizations) and Phase 3+ (documents,
-conversations, etc.).
+every table.
 """
+
+from app.models.membership import OrganizationMember
+from app.models.organization import Organization
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
+
+__all__ = ["User", "Organization", "OrganizationMember", "RefreshToken"]

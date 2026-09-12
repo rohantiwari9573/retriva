@@ -1,11 +1,11 @@
-"""Aggregates all v1 route modules under a single router.
-
-New route modules (auth, users, organizations, documents, ...) get included here as
-they're built in later phases, keeping app.main free of per-feature imports.
-"""
+"""Aggregates all v1 route modules under a single router."""
 
 from fastapi import APIRouter
 
+from app.api.v1 import auth, organizations, users
+
 api_router = APIRouter()
 
-# Phase 2+: api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(organizations.router, prefix="/organizations", tags=["organizations"])

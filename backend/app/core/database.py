@@ -33,8 +33,15 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Per-request session with unit-of-work semantics: commits if the route
+    completed without raising, rolls back otherwise. Routes/services never
+    need to call session.commit() themselves."""
     async with AsyncSessionLocal() as session:
         try:
             yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
         finally:
             await session.close()

@@ -53,12 +53,12 @@ jobs:
         run: ruff check app tests
 
       - name: Type check (mypy)
-        run: mypy app || true # non-blocking until Phase 2 model coverage lands
+        run: mypy app
 
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://nexus:nexus@localhost:5432/nexus_test
-          REDIS_URL: redis://localhost:6379/0
+          REDIS_URL: redis://localhost:6379/15
           JWT_SECRET: ci-test-secret-not-for-production-use-only
         run: pytest --cov=app --cov-report=term-missing
 
