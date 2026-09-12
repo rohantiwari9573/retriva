@@ -49,11 +49,23 @@ class Settings(BaseSettings):
 
     # --- Object storage ---
     STORAGE_PROVIDER: Literal["minio", "s3"] = "minio"
-    S3_ENDPOINT_URL: str | None = "http://localhost:9000"  # None for real AWS S3
+    # Internal, container-to-container endpoint; None for real AWS S3.
+    S3_ENDPOINT_URL: str | None = "http://minio:9000"
+    # Presigned URLs are signed against the endpoint used to reach the bucket -
+    # inside Docker that's "http://minio:9000", which the user's browser can't
+    # resolve. This is the endpoint baked into URLs handed to the frontend.
+    # Defaults to S3_ENDPOINT_URL when unset (fine for real S3/production).
+    S3_PUBLIC_ENDPOINT_URL: str | None = "http://localhost:9000"
     S3_BUCKET: str = "nexus-documents"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
     AWS_REGION: str = "us-east-1"
+    DOWNLOAD_URL_EXPIRE_SECONDS: int = 300
+
+    # --- Document upload ---
+    ALLOWED_DOCUMENT_EXTENSIONS: list[str] = [".pdf", ".docx", ".txt", ".md"]
+    DOCUMENTS_PAGE_SIZE_DEFAULT: int = 20
+    DOCUMENTS_PAGE_SIZE_MAX: int = 100
 
     # --- LLM / Embedding / Reranker providers ---
     # "openai_compatible" works for OpenAI, LM Studio, or any OpenAI-compatible local server.

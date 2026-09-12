@@ -33,6 +33,8 @@ from alembic import command
 from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
+from app.storage.dependency import get_storage_provider
+from app.storage.memory import InMemoryStorageProvider
 
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -87,7 +89,17 @@ async def _flush_rate_limits() -> AsyncGenerator[None, None]:
 
 
 @pytest.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+def fake_storage() -> InMemoryStorageProvider:
+    # No live MinIO in CI - upload/download/delete tests run against this
+    # in-memory fake instead. Real S3/MinIO behavior (bucket creation,
+    # presigned URL signing) is exercised manually against Docker Compose.
+    return InMemoryStorageProvider()
+
+
+@pytest.fixture
+async def client(
+    db_session: AsyncSession, fake_storage: InMemoryStorageProvider
+) -> AsyncGenerator[AsyncClient, None]:
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
         # Mirrors app.core.database.get_db's commit/rollback-per-request
         # semantics, but commits land in the SAVEPOINT from db_session rather
@@ -100,7 +112,14 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
             raise
 
     app.dependency_overrides[get_db] = _override_get_db
-    transport = ASGITransport(app=app)
+    app.dependency_overrides[get_storage_provider] = lambda: fake_storage
+    # raise_app_exceptions=False: match real deployment behavior, where an
+    # unhandled exception becomes the generic-Exception handler's 500 JSON
+    # response, not a Python exception escaping to the caller. Without this,
+    # httpx's default re-raises the original error past our error handling
+    # entirely, which is useful for debugging a broken test but wrong for
+    # asserting on the actual HTTP contract.
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac

@@ -23,11 +23,16 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // FormData bodies (file uploads) need the browser to set their own
+  // multipart Content-Type with a boundary - forcing application/json here
+  // would break the upload silently.
+  const isFormData = init?.body instanceof FormData;
+
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...init?.headers,
     },
   });

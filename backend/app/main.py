@@ -10,6 +10,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.storage.s3 import get_s3_storage_provider
 
 configure_logging()
 logger = get_logger(__name__)
@@ -18,6 +19,7 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("app_startup", environment=settings.ENVIRONMENT)
+    get_s3_storage_provider().ensure_bucket_exists()
     yield
     logger.info("app_shutdown")
 

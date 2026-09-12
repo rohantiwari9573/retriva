@@ -21,7 +21,6 @@ dependencies = [
     "httpx>=0.27",
     "boto3>=1.35",
     "email-validator>=2.2",
-    "python-magic-bin>=0.4.14; sys_platform == 'win32'",
     "structlog>=24.4",
     "prometheus-client>=0.21",
     "pypdf>=5.1",

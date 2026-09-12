@@ -30,3 +30,22 @@ export type Member = {
   role: OrgRole;
   created_at: string;
 };
+
+export type DocumentStatus = "UPLOADING" | "PROCESSING" | "READY" | "FAILED" | "DELETED";
+
+export type Document = {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  status: DocumentStatus;
+  uploaded_by: string | null;
+  created_at: string;
+};
+
+export type DocumentListResponse = {
+  items: Document[];
+  total: number;
+  page: number;
+  page_size: number;
+};

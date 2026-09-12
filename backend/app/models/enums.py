@@ -22,3 +22,14 @@ ROLE_HIERARCHY: dict[OrgRole, int] = {
     OrgRole.ADMIN: 2,
     OrgRole.OWNER: 3,
 }
+
+
+class DocumentStatus(enum.StrEnum):
+    UPLOADING = "UPLOADING"
+    PROCESSING = "PROCESSING"
+    READY = "READY"
+    FAILED = "FAILED"
+    # DELETED is defined for schema completeness with the original spec but
+    # unused by Phase 3, which hard-deletes rows on removal - kept for a
+    # later phase that might switch to soft-delete for audit/undo purposes.
+    DELETED = "DELETED"

@@ -3,7 +3,7 @@
 Multi-tenant RAG platform for organizations to upload internal documents and ask
 questions against them, with citations, hybrid retrieval, and streaming answers.
 
-> **Status:** Phase 2 (auth, organizations, RBAC) complete. See `docs/` for
+> **Status:** Phase 3 (document upload, storage) complete. See `docs/` for
 > architecture and system design once later phases land. This README will grow
 > into full project documentation in Phase 12 — for now it covers local setup
 > and what's implemented so far.
@@ -20,9 +20,15 @@ questions against them, with citations, hybrid retrieval, and streaming answers.
   FastAPI dependencies (`app/api/v1/deps.py`), never trusting client-supplied
   role claims. Last-owner protection prevents an org from being locked out of
   admin access.
-- **Frontend:** `/login`, `/register`, `/dashboard`, `/settings/profile`,
-  `/settings/organization`, `/settings/members` - all wired to the real
-  backend, no mocked data.
+- **Documents:** upload (PDF/DOCX/TXT/Markdown), list, view, presigned-URL
+  download, delete - backed by MinIO locally / S3 in production via a
+  swappable `StorageProvider`. Content is validated by sniffing actual file
+  bytes (magic numbers / ZIP structure), not by trusting the extension or
+  Content-Type header. Exact-duplicate uploads to the same org are rejected
+  (409) via a content-hash uniqueness constraint.
+- **Frontend:** `/login`, `/register`, `/dashboard`, `/documents`,
+  `/settings/profile`, `/settings/organization`, `/settings/members` - all
+  wired to the real backend, no mocked data.
 
 ## Stack
 
@@ -86,13 +92,36 @@ backend/app/
   services/     # business logic
   repositories/ # DB access, org-scoped queries
   rag/          # retrieval, embedding, llm, reranking, prompts
-  workers/      # Celery tasks
-  storage/      # S3/MinIO abstraction
+  workers/      # Celery tasks (worker infra runs; no tasks registered until Phase 4)
+  storage/      # S3/MinIO abstraction (StorageProvider protocol + S3/memory impls)
 frontend/src/
   app/          # Next.js routes ((app) route group = authenticated shell)
-  components/   # ui, layout, organizations (chat, documents land in later phases)
-  hooks/        # TanStack Query hooks (use-auth, use-organizations, use-members)
+  components/   # ui, layout, organizations, documents (chat lands in later phases)
+  hooks/        # TanStack Query hooks (use-auth, use-organizations, use-documents, ...)
 ```
+
+## Document upload design
+
+- **Storage key ≠ filename.** The object key is `organizations/{org_id}/documents/{document_id}{ext}`,
+  derived entirely from server-generated IDs. The client-supplied filename is
+  kept only as display metadata (`original_filename`) and never touches the
+  storage path - a filename like `../../etc/passwd.pdf` can't escape anything
+  because it's never part of a path in the first place.
+- **Content validation is byte-level.** `app/services/file_validation.py`
+  hand-rolls signature checks (PDF's `%PDF-` header, DOCX's ZIP structure +
+  `word/document.xml` entry, UTF-8-decodability for TXT/MD) rather than
+  trusting the extension or an attacker-controlled `Content-Type` header.
+- **Status stops at `PROCESSING`.** Upload validates, stores, and marks the
+  document `PROCESSING` - nothing currently advances it to `READY`. That's
+  deliberate: `READY` is defined to mean "parsed, chunked, embedded,
+  retrievable," which doesn't exist until Phase 4. A stub task that fakes
+  `READY` would make Phase 5's retrieval logic silently wrong later.
+- **Storage is a FastAPI dependency**, not a hardcoded import - tests override
+  it with an in-memory fake (`app/storage/memory.py`), so the full upload/
+  download/delete test suite runs without a live MinIO in CI.
+- **Presigned URLs use a separate public endpoint** (`S3_PUBLIC_ENDPOINT_URL`)
+  from the one used for internal upload/delete calls - inside Docker, MinIO is
+  reachable at `http://minio:9000`, which a user's browser can't resolve.
 
 ## Authentication & authorization design
 
@@ -112,14 +141,17 @@ frontend/src/
 - **RBAC:** role hierarchy (`OWNER > ADMIN > MEMBER > VIEWER`) checked via
   `require_role()`, applied per-route, never inferred from client input.
 
-## Known limitations (Phase 2)
+## Known limitations
 
 - No email delivery - "adding a member" requires the invitee to already have
   a Nexus account; there's no email-based invite flow yet, and forgot-password
   is not implemented for the same reason (no SMTP/mail service configured).
 - No CSRF token beyond SameSite=Lax cookies + strict CORS origin allowlist.
-- Documents, conversations, RAG, and admin panel don't exist yet - see the
-  phased plan below.
+- No document parsing, chunking, embeddings, retrieval, RAG, conversations,
+  or admin panel yet - documents stop at `PROCESSING` until Phase 4.
+- Hard delete only for documents (no soft-delete/undo).
+- No per-document ACLs - any org member (VIEWER+) can see/download any
+  document uploaded to that organization.
 
 ## Documentation
 

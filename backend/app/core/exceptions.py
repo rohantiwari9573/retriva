@@ -53,6 +53,21 @@ class RateLimitedError(AppError):
     code = "RATE_LIMITED"
 
 
+class PayloadTooLargeError(AppError):
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    code = "FILE_TOO_LARGE"
+
+
+class UnsupportedFileTypeError(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "UNSUPPORTED_FILE_TYPE"
+
+
+class StorageError(AppError):
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "STORAGE_ERROR"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
@@ -66,7 +81,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": {
                     "code": "VALIDATION_ERROR",
