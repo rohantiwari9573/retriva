@@ -92,3 +92,19 @@ async def delete_document(
     service = DocumentService(db, storage)
     document = await service.get_or_404(document_id, ctx.organization.id)
     await service.delete(document)
+
+
+@router.post(
+    "/{organization_id}/documents/{document_id}/retry",
+    response_model=DocumentPublic,
+)
+async def retry_document_processing(
+    document_id: uuid.UUID,
+    ctx: OrgContext = Depends(require_role(OrgRole.MEMBER)),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageProvider = Depends(get_storage_provider),
+) -> DocumentPublic:
+    service = DocumentService(db, storage)
+    document = await service.get_or_404(document_id, ctx.organization.id)
+    document = await service.retry(document)
+    return DocumentPublic.model_validate(document)

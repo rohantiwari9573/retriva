@@ -1,7 +1,17 @@
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -11,6 +21,7 @@ from app.models.enums import DocumentStatus
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from app.models.document_chunk import DocumentChunk
     from app.models.organization import Organization
     from app.models.user import User
 
@@ -52,5 +63,27 @@ class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=DocumentStatus.UPLOADING,
     )
 
+    # --- Processing metadata (Phase 4) ---
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    processing_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    embedding_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Safe-for-display summary only (e.g. "Could not reach embedding service") -
+    # never a raw exception message or stack trace; see DocumentProcessingError
+    # subclasses' messages in app/ingestion/errors.py, which are all written to
+    # be end-user-safe by construction.
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     organization: Mapped["Organization"] = relationship()
     uploader: Mapped["User | None"] = relationship()
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

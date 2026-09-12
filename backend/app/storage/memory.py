@@ -7,6 +7,8 @@ storage behavior (bucket creation, presigned URL signing) is exercised
 manually against Docker Compose's MinIO, not by the automated suite.
 """
 
+from app.core.exceptions import StorageObjectNotFoundError
+
 
 class InMemoryStorageProvider:
     def __init__(self) -> None:
@@ -14,6 +16,14 @@ class InMemoryStorageProvider:
 
     async def upload(self, key: str, data: bytes, content_type: str) -> None:
         self.objects[key] = data
+
+    async def download(self, key: str) -> bytes:
+        try:
+            return self.objects[key]
+        except KeyError as exc:
+            raise StorageObjectNotFoundError(
+                "The stored file could not be found."
+            ) from exc
 
     async def delete(self, key: str) -> None:
         self.objects.pop(key, None)

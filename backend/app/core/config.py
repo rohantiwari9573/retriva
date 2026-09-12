@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: str = "not-needed-for-local"
     EMBEDDING_MODEL: str = "nomic-embed-text"
     EMBEDDING_DIMENSIONS: int = 768
+    EMBEDDING_BATCH_SIZE: int = 32
+    EMBEDDING_REQUEST_TIMEOUT_SECONDS: int = 30
 
     RERANKER_PROVIDER: Literal["none", "cohere", "local_cross_encoder"] = "none"
 
@@ -91,6 +93,10 @@ class Settings(BaseSettings):
     MAX_RESPONSE_TOKENS: int = 1024
     CHUNK_SIZE_TOKENS: int = 500
     CHUNK_OVERLAP_TOKENS: int = 50
+
+    # --- Document processing (Celery) ---
+    DOCUMENT_PROCESSING_MAX_RETRIES: int = 3
+    DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS: int = 10
 
     # --- Rate limiting (requests per window per identity) ---
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5

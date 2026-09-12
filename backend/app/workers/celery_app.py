@@ -1,6 +1,5 @@
 """Celery application instance.
 
-Tasks (document parsing, chunking, embedding, deletion) are registered in Phase 4.
 Kept as a separate module from FastAPI's app so `celery -A app.workers.celery_app`
 doesn't import the web app's routing layer.
 """
@@ -13,6 +12,7 @@ celery_app = Celery(
     "nexus",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    include=["app.workers.tasks.document_processing"],
 )
 
 celery_app.conf.update(

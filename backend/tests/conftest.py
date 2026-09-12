@@ -33,6 +33,7 @@ from alembic import command
 from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
+from app.rag.embedding.testing import DeterministicTestEmbeddingProvider
 from app.storage.dependency import get_storage_provider
 from app.storage.memory import InMemoryStorageProvider
 
@@ -88,12 +89,60 @@ async def _flush_rate_limits() -> AsyncGenerator[None, None]:
     yield
 
 
+@pytest.fixture(autouse=True)
+async def _flush_celery_broker() -> AsyncGenerator[None, None]:
+    # Upload tests exercise the real DocumentService._enqueue_processing path,
+    # which calls process_document.delay() against the real Celery broker
+    # (Redis, a different logical DB than rate limiting) - nothing in the
+    # test process consumes those messages, so flush between tests to avoid
+    # an ever-growing queue in local/CI Redis.
+    redis = Redis.from_url(settings.CELERY_BROKER_URL, decode_responses=True)
+    await redis.flushdb()
+    await redis.aclose()
+    yield
+
+
 @pytest.fixture
 def fake_storage() -> InMemoryStorageProvider:
     # No live MinIO in CI - upload/download/delete tests run against this
     # in-memory fake instead. Real S3/MinIO behavior (bucket creation,
     # presigned URL signing) is exercised manually against Docker Compose.
     return InMemoryStorageProvider()
+
+
+@pytest.fixture
+def fake_embedding_provider() -> DeterministicTestEmbeddingProvider:
+    # No live LM Studio in CI - ingestion pipeline integration tests run
+    # against this deterministic fake instead of real embeddings. See
+    # app/rag/embedding/testing.py's module docstring for why this is
+    # separate from a mocked provider (unit tests) and from real LM Studio
+    # (manual E2E only).
+    return DeterministicTestEmbeddingProvider(dimensions=settings.EMBEDDING_DIMENSIONS)
+
+
+class _NoCloseSessionContext:
+    """Wraps an already-open test session so it can be handed to code that
+    expects an async_sessionmaker-shaped callable (`session_factory()` used
+    as `async with ...`) without that code closing the shared test session -
+    closing it would break the outer SAVEPOINT-based rollback this test
+    suite relies on for isolation."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def __call__(self) -> "_NoCloseSessionContext":
+        return self
+
+    async def __aenter__(self) -> AsyncSession:
+        return self._session
+
+    async def __aexit__(self, *exc_info: object) -> bool:
+        return False
+
+
+@pytest.fixture
+def pipeline_session_factory(db_session: AsyncSession) -> _NoCloseSessionContext:
+    return _NoCloseSessionContext(db_session)
 
 
 @pytest.fixture

@@ -41,6 +41,12 @@ export type Document = {
   status: DocumentStatus;
   uploaded_by: string | null;
   created_at: string;
+  processing_started_at: string | null;
+  processing_completed_at: string | null;
+  chunk_count: number;
+  embedding_model: string | null;
+  failure_reason: string | null;
+  retry_count: number;
 };
 
 export type DocumentListResponse = {

@@ -46,9 +46,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      - name: Enable pgvector extension
-        run: PGPASSWORD=nexus psql -h localhost -U nexus -d nexus_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
       - name: Lint (ruff)
         run: ruff check app tests
 

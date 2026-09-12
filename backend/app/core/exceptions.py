@@ -68,6 +68,19 @@ class StorageError(AppError):
     code = "STORAGE_ERROR"
 
 
+class ProcessingQueueError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "PROCESSING_QUEUE_UNAVAILABLE"
+
+
+class StorageObjectNotFoundError(StorageError):
+    """The storage key doesn't resolve to an object. Distinct from a generic
+    StorageError because it's a permanent condition (the row's storage_key is
+    stale/gone) - retrying won't fix it, unlike a transient network/5xx error."""
+
+    code = "STORAGE_OBJECT_NOT_FOUND"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:

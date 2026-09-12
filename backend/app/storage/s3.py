@@ -17,7 +17,7 @@ from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from app.core.config import settings
-from app.core.exceptions import StorageError
+from app.core.exceptions import StorageError, StorageObjectNotFoundError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +58,22 @@ class S3StorageProvider:
         except ClientError as exc:
             logger.error("storage_upload_failed", key=key, exc_info=exc)
             raise StorageError("Failed to store the uploaded file.") from exc
+
+    async def download(self, key: str) -> bytes:
+        try:
+            response = await asyncio.to_thread(
+                self._client.get_object, Bucket=self._bucket, Key=key
+            )
+            body = response["Body"]
+            return await asyncio.to_thread(body.read)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in ("NoSuchKey", "404"):
+                raise StorageObjectNotFoundError(
+                    "The stored file could not be found."
+                ) from exc
+            logger.error("storage_download_failed", key=key, exc_info=exc)
+            raise StorageError("Failed to read the stored file.") from exc
 
     async def delete(self, key: str) -> None:
         try:

@@ -10,14 +10,26 @@ package):
   4. Insert the document row (status=UPLOADING) to get a UUID.
   5. Upload to storage under a key derived from that UUID - never from the
      client-supplied filename, which is kept only as display metadata.
-  6. On success, flip to PROCESSING. Nothing currently advances a document
-     past PROCESSING - Phase 4 owns parsing/chunking/embedding. This is a
-     deliberate, honest stopping point, not an oversight.
-  7. On storage failure, flip to FAILED and commit that fact immediately -
+  6. On success, flip to PROCESSING and commit *before* enqueueing the
+     Celery task - the worker looks the document up by id in its own
+     transaction, so it must already be durably committed by the time the
+     task can possibly run.
+  7. Enqueue app.workers.tasks.document_processing.process_document. If that
+     enqueue itself fails (e.g. Redis/broker unreachable), the document
+     would otherwise sit in PROCESSING forever with nothing ever picking it
+     up - so this flips it straight to FAILED with a retryable reason
+     instead, matching the "no document stuck permanently in PROCESSING"
+     requirement.
+  8. On storage failure, flip to FAILED and commit that fact immediately -
      otherwise get_db's rollback-on-exception would erase the failure record
      along with everything else in the transaction.
+
+Parsing, chunking, and embedding themselves happen entirely in the Celery
+worker (app/ingestion/pipeline.py) - this module's job stops at handing off
+a durably-stored, durably-committed document for that worker to pick up.
 """
 
+import asyncio
 import hashlib
 import uuid
 
@@ -25,12 +37,21 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import ConflictError, NotFoundError, PayloadTooLargeError
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    PayloadTooLargeError,
+    ProcessingQueueError,
+)
+from app.core.logging import get_logger
 from app.models.document import Document
 from app.models.enums import DocumentStatus
 from app.repositories.document_repository import DocumentRepository
 from app.services.file_validation import detect_and_validate_file_type
 from app.storage.base import StorageProvider
+from app.workers.tasks.document_processing import process_document
+
+logger = get_logger(__name__)
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
@@ -73,7 +94,43 @@ class DocumentService:
 
         document.storage_key = storage_key
         document.status = DocumentStatus.PROCESSING
+        await self.db.commit()
+
+        await self._enqueue_processing(document)
         return document
+
+    async def retry(self, document: Document) -> Document:
+        """Re-queue a FAILED document. Only FAILED is a valid source state -
+        this is not a general-purpose "restart processing" button; a
+        PROCESSING or READY document already has a worker on it or is done."""
+        if document.status != DocumentStatus.FAILED:
+            raise ConflictError(
+                "Only a failed document can be retried.", code="INVALID_STATUS_TRANSITION"
+            )
+        document.status = DocumentStatus.PROCESSING
+        document.failure_reason = None
+        await self.db.commit()
+
+        await self._enqueue_processing(document)
+        return document
+
+    async def _enqueue_processing(self, document: Document) -> None:
+        try:
+            await asyncio.to_thread(process_document.delay, str(document.id))
+        except Exception as exc:
+            # The document is durably PROCESSING but nothing will ever pick
+            # it up if the broker is unreachable - fail it now rather than
+            # leave it stuck forever with no worker ever assigned.
+            logger.error("document_enqueue_failed", document_id=str(document.id), exc_info=exc)
+            document.status = DocumentStatus.FAILED
+            document.failure_reason = (
+                "Could not queue this document for processing. Please try again."
+            )
+            await self.db.commit()
+            raise ProcessingQueueError(
+                "Document uploaded, but could not be queued for processing. "
+                "Please retry."
+            ) from exc
 
     async def list_for_org(
         self, org_id: uuid.UUID, *, page: int, page_size: int

@@ -1,3 +1,5 @@
+import { Loader2 } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import type { DocumentStatus } from "@/lib/types";
 
@@ -12,6 +14,7 @@ const STATUS_STYLES: Record<DocumentStatus, string> = {
 export function DocumentStatusBadge({ status }: { status: DocumentStatus }) {
   return (
     <Badge variant="secondary" className={STATUS_STYLES[status]}>
+      {status === "PROCESSING" && <Loader2 className="h-3 w-3 animate-spin" />}
       {status}
     </Badge>
   );

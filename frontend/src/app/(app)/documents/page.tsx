@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Download, FileText, Trash2, Upload } from "lucide-react";
+import { Download, FileText, RotateCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -31,6 +31,7 @@ import {
   useDeleteDocument,
   useDocuments,
   useDownloadDocument,
+  useRetryDocument,
   useUploadDocument,
 } from "@/hooks/use-documents";
 import { ApiError } from "@/lib/api-client";
@@ -98,8 +99,8 @@ export default function DocumentsPage() {
         <CardHeader>
           <CardTitle>{data?.total ?? 0} documents</CardTitle>
           <CardDescription>
-            Newly uploaded documents show as PROCESSING - parsing, chunking, and retrieval
-            arrive in a later phase.
+            Newly uploaded documents show as PROCESSING while they&apos;re parsed, chunked, and
+            embedded. This list updates automatically until processing finishes.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -125,6 +126,7 @@ export default function DocumentsPage() {
                     document={document}
                     organizationId={organization.id}
                     canDelete={canDelete}
+                    canRetry={canUpload}
                   />
                 ))}
               </TableBody>
@@ -168,13 +170,16 @@ function DocumentRow({
   document,
   organizationId,
   canDelete,
+  canRetry,
 }: {
   document: Document;
   organizationId: string;
   canDelete: boolean;
+  canRetry: boolean;
 }) {
   const deleteDocument = useDeleteDocument(organizationId);
   const downloadDocument = useDownloadDocument(organizationId);
+  const retryDocument = useRetryDocument(organizationId);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const handleDownload = () => {
@@ -198,9 +203,25 @@ function DocumentRow({
     setConfirmOpen(false);
   };
 
+  const handleRetry = () => {
+    retryDocument.mutate(document.id, {
+      onSuccess: () => toast.success(`Retrying ${document.original_filename}`),
+      onError: (error) => {
+        if (error instanceof ApiError) toast.error(error.message);
+      },
+    });
+  };
+
   return (
     <TableRow>
-      <TableCell className="font-medium">{document.original_filename}</TableCell>
+      <TableCell className="font-medium">
+        {document.original_filename}
+        {document.status === "FAILED" && document.failure_reason && (
+          <p className="mt-0.5 text-xs font-normal text-destructive">
+            {document.failure_reason}
+          </p>
+        )}
+      </TableCell>
       <TableCell>{formatFileSize(document.size_bytes)}</TableCell>
       <TableCell>
         <DocumentStatusBadge status={document.status} />
@@ -210,6 +231,17 @@ function DocumentRow({
       </TableCell>
       <TableCell>
         <div className="flex justify-end gap-1">
+          {document.status === "FAILED" && canRetry && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRetry}
+              disabled={retryDocument.isPending}
+              aria-label={`Retry processing ${document.original_filename}`}
+            >
+              <RotateCw className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
