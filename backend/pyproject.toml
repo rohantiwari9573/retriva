@@ -1,0 +1,59 @@
+[project]
+name = "nexus-backend"
+version = "0.1.0"
+description = "Nexus AI Knowledge Platform - Backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "asyncpg>=0.30",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.3",
+    "redis>=5.2",
+    "celery>=5.4",
+    "pyjwt>=2.10",
+    "argon2-cffi>=23.1",
+    "python-multipart>=0.0.17",
+    "httpx>=0.27",
+    "boto3>=1.35",
+    "email-validator>=2.2",
+    "python-magic-bin>=0.4.14; sys_platform == 'win32'",
+    "structlog>=24.4",
+    "prometheus-client>=0.21",
+    "pypdf>=5.1",
+    "python-docx>=1.1",
+    "tenacity>=9.0",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "faker>=33.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
