@@ -153,9 +153,34 @@ class Settings(BaseSettings):
     RATE_LIMIT_RETRY_PER_MINUTE: int = 10
     RATE_LIMIT_RETRIEVAL_DEBUG_PER_MINUTE: int = 20
 
-    # --- Observability ---
+    # --- Observability (Phase 8) ---
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: Literal["json", "console"] = "console"
+    # Master switches - both default on for local dev, and both fail open:
+    # if the underlying exporter/library can't reach its backend, telemetry
+    # is dropped, never allowed to break a request. See docs/observability.md
+    # "Failure isolation".
+    PROMETHEUS_ENABLED: bool = True
+    OTEL_ENABLED: bool = True
+    OTEL_SERVICE_NAME: str = "nexus-backend"
+    # OTLP/gRPC endpoint - Jaeger's all-in-one image accepts OTLP natively
+    # since 1.35, so no separate OpenTelemetry Collector is required (see
+    # docs/observability.md for why one was evaluated and not added).
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://jaeger:4317"
+    # parentbased_traceidratio + arg=1.0 means "sample everything unless a
+    # parent span already decided otherwise" - the right default for local
+    # dev, where full visibility matters more than reducing trace volume.
+    OTEL_TRACES_SAMPLER: Literal[
+        "always_on", "always_off", "traceidratio", "parentbased_traceidratio"
+    ] = "parentbased_traceidratio"
+    OTEL_TRACES_SAMPLER_ARG: float = 1.0
+    # The Celery worker has no HTTP server of its own (see docker-compose.yml's
+    # healthcheck comment) - this opens a small dedicated prometheus_client
+    # HTTP server inside the worker process purely so celery_*/
+    # document_processing_* metrics have somewhere to be scraped from. See
+    # docs/observability.md "Celery instrumentation" for the worker
+    # concurrency tradeoff this implies.
+    WORKER_METRICS_PORT: int = 9808
 
 
 @lru_cache

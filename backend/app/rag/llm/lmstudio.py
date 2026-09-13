@@ -14,12 +14,21 @@ unavailable.
 """
 
 import json
+import time
 from collections.abc import AsyncGenerator
 
 import httpx
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import (
+    llm_failures_total,
+    llm_request_duration_seconds,
+    llm_requests_total,
+    llm_time_to_first_token_seconds,
+    llm_tokens_generated_total,
+)
+from app.core.telemetry import get_tracer
 from app.rag.llm.base import (
     ChatMessage,
     LLMProviderResponseError,
@@ -29,6 +38,7 @@ from app.rag.llm.base import (
 )
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 class LMStudioLLMProvider:
@@ -59,6 +69,31 @@ class LMStudioLLMProvider:
         return payload
 
     async def generate(
+        self, messages: list[ChatMessage], *, max_tokens: int | None = None
+    ) -> str:
+        """Instrumentation wrapper (Phase 8) around _generate_impl - the
+        network call and error handling below are unchanged."""
+        provider = settings.LLM_PROVIDER
+        start = time.perf_counter()
+        with tracer.start_as_current_span("llm.generate") as span:
+            span.set_attribute("llm.provider", provider)
+            span.set_attribute("llm.model", self.model)
+            span.set_attribute("llm.streaming", False)
+            try:
+                result = await self._generate_impl(messages, max_tokens=max_tokens)
+            except Exception as exc:
+                llm_requests_total.labels(
+                    provider=provider, streaming="false", status="failure"
+                ).inc()
+                llm_failures_total.labels(provider=provider, reason=type(exc).__name__).inc()
+                raise
+            llm_requests_total.labels(provider=provider, streaming="false", status="success").inc()
+            llm_request_duration_seconds.labels(provider=provider, streaming="false").observe(
+                time.perf_counter() - start
+            )
+            return result
+
+    async def _generate_impl(
         self, messages: list[ChatMessage], *, max_tokens: int | None = None
     ) -> str:
         url = f"{self.base_url}/chat/completions"
@@ -109,6 +144,44 @@ class LMStudioLLMProvider:
             ) from exc
 
     async def stream(
+        self, messages: list[ChatMessage], *, max_tokens: int | None = None
+    ) -> AsyncGenerator[str, None]:
+        """Instrumentation wrapper (Phase 8) around _stream_impl - records
+        request count/duration/failures and time-to-first-token around the
+        real streaming generator without changing its cancellation/error
+        semantics (this function is itself a generator, so GeneratorExit on
+        early close() still propagates through it into _stream_impl exactly
+        as it did before this wrapper existed)."""
+        provider = settings.LLM_PROVIDER
+        start = time.perf_counter()
+        first_token_at: float | None = None
+        token_count = 0
+        with tracer.start_as_current_span("llm.stream") as span:
+            span.set_attribute("llm.provider", provider)
+            span.set_attribute("llm.model", self.model)
+            span.set_attribute("llm.streaming", True)
+            try:
+                async for delta in self._stream_impl(messages, max_tokens=max_tokens):
+                    if first_token_at is None:
+                        first_token_at = time.perf_counter()
+                        llm_time_to_first_token_seconds.labels(provider=provider).observe(
+                            first_token_at - start
+                        )
+                    token_count += 1
+                    yield delta
+            except Exception as exc:
+                llm_requests_total.labels(
+                    provider=provider, streaming="true", status="failure"
+                ).inc()
+                llm_failures_total.labels(provider=provider, reason=type(exc).__name__).inc()
+                raise
+            llm_requests_total.labels(provider=provider, streaming="true", status="success").inc()
+            llm_request_duration_seconds.labels(provider=provider, streaming="true").observe(
+                time.perf_counter() - start
+            )
+            llm_tokens_generated_total.labels(provider=provider).inc(token_count)
+
+    async def _stream_impl(
         self, messages: list[ChatMessage], *, max_tokens: int | None = None
     ) -> AsyncGenerator[str, None]:
         url = f"{self.base_url}/chat/completions"

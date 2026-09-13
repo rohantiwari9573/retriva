@@ -7,6 +7,7 @@ provider - VectorRetriever and KeywordRetriever are pure SQL, HybridRetriever
 is where "turn a question into a vector" meets "search with that vector".
 """
 
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -15,6 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import (
+    rag_fusion_duration_seconds,
+    rag_keyword_search_duration_seconds,
+    rag_retrieval_duration_seconds,
+    rag_retrieval_empty_total,
+    rag_retrieval_total,
+    rag_vector_search_duration_seconds,
+)
+from app.core.telemetry import get_tracer
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.rag.embedding.base import EmbeddingProvider
@@ -24,6 +34,7 @@ from app.rag.retrieval.types import RetrievedChunk
 from app.rag.retrieval.vector import VectorRetriever
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 @dataclass(frozen=True)
@@ -51,34 +62,56 @@ class HybridRetriever:
         candidate_pool = candidate_pool or settings.RETRIEVAL_CANDIDATE_POOL
         top_k = top_k or settings.RETRIEVAL_TOP_K
 
-        query_embedding = await self.embedding_provider.embed_query(query)
+        with tracer.start_as_current_span("rag.retrieval") as retrieval_span:
+            retrieval_start = time.perf_counter()
 
-        vector_hits = await self.vector.search_by_embedding(
-            organization_id=organization_id, query_embedding=query_embedding, limit=candidate_pool
-        )
-        keyword_hits = await self.keyword.search(
-            organization_id=organization_id, query=query, limit=candidate_pool
-        )
+            query_embedding = await self.embedding_provider.embed_query(query)
 
-        fused = reciprocal_rank_fusion(
-            vector_hits,
-            keyword_hits,
-            vector_weight=settings.VECTOR_SEARCH_WEIGHT,
-            keyword_weight=settings.KEYWORD_SEARCH_WEIGHT,
-            k=settings.RRF_K,
-        )
-        top_fused = fused[:top_k]
+            with tracer.start_as_current_span("rag.vector_search"):
+                vector_start = time.perf_counter()
+                vector_hits = await self.vector.search_by_embedding(
+                    organization_id=organization_id,
+                    query_embedding=query_embedding,
+                    limit=candidate_pool,
+                )
+                rag_vector_search_duration_seconds.observe(time.perf_counter() - vector_start)
 
-        chunks = await self._hydrate(top_fused, organization_id=organization_id)
+            with tracer.start_as_current_span("rag.keyword_search"):
+                keyword_start = time.perf_counter()
+                keyword_hits = await self.keyword.search(
+                    organization_id=organization_id, query=query, limit=candidate_pool
+                )
+                rag_keyword_search_duration_seconds.observe(time.perf_counter() - keyword_start)
 
-        best_vector_similarity = max((h.score for h in vector_hits), default=None)
-        candidate_ids = {h.chunk_id for h in vector_hits} | {h.chunk_id for h in keyword_hits}
+            with tracer.start_as_current_span("rag.rrf"):
+                fusion_start = time.perf_counter()
+                fused = reciprocal_rank_fusion(
+                    vector_hits,
+                    keyword_hits,
+                    vector_weight=settings.VECTOR_SEARCH_WEIGHT,
+                    keyword_weight=settings.KEYWORD_SEARCH_WEIGHT,
+                    k=settings.RRF_K,
+                )
+                rag_fusion_duration_seconds.observe(time.perf_counter() - fusion_start)
+            top_fused = fused[:top_k]
 
-        return HybridRetrievalResult(
-            chunks=chunks,
-            candidates_considered=len(candidate_ids),
-            best_vector_similarity=best_vector_similarity,
-        )
+            chunks = await self._hydrate(top_fused, organization_id=organization_id)
+
+            best_vector_similarity = max((h.score for h in vector_hits), default=None)
+            candidate_ids = {h.chunk_id for h in vector_hits} | {h.chunk_id for h in keyword_hits}
+
+            rag_retrieval_duration_seconds.observe(time.perf_counter() - retrieval_start)
+            rag_retrieval_total.labels(status="success").inc()
+            if not chunks:
+                rag_retrieval_empty_total.inc()
+            retrieval_span.set_attribute("rag.retrieval.result_count", len(chunks))
+            retrieval_span.set_attribute("rag.retrieval.candidate_count", len(candidate_ids))
+
+            return HybridRetrievalResult(
+                chunks=chunks,
+                candidates_considered=len(candidate_ids),
+                best_vector_similarity=best_vector_similarity,
+            )
 
     async def _hydrate(
         self, fused_results: list[FusedResult], *, organization_id: uuid.UUID

@@ -1,16 +1,33 @@
 """FastAPI application entrypoint."""
 
+import time
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.api.metrics import router as metrics_router
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.metrics import (
+    http_request_duration_seconds,
+    http_requests_in_flight,
+    http_requests_total,
+)
+from app.core.request_id import resolve_request_id
+from app.core.telemetry import (
+    init_tracing,
+    instrument_celery,
+    instrument_fastapi_app,
+    instrument_httpx,
+    instrument_redis,
+    instrument_sqlalchemy,
+)
 from app.ingestion.schema_check import (
     EmbeddingSchemaMismatchError,
     assert_embedding_dimension_matches,
@@ -18,6 +35,7 @@ from app.ingestion.schema_check import (
 from app.storage.s3 import get_s3_storage_provider
 
 configure_logging()
+init_tracing()
 logger = get_logger(__name__)
 
 
@@ -70,6 +88,12 @@ app = FastAPI(
     redoc_url=None,
 )
 
+instrument_fastapi_app(app)
+instrument_sqlalchemy(engine)
+instrument_redis()
+instrument_httpx()
+instrument_celery()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -77,6 +101,80 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _route_template(request: Request) -> str:
+    """The full, cumulative path template for the matched route (e.g.
+    "/api/v1/organizations/{organization_id}/documents/{document_id}"), for
+    use as a bounded, low-cardinality metric/log label - never the concrete
+    request path, which contains real UUIDs.
+
+    FastAPI's `include_router` no longer flattens nested routers into
+    individually-prefixed APIRoute objects at include time (recent FastAPI
+    versions resolve routing hierarchically instead), so
+    `request.scope["route"].path` only carries the leaf router's OWN local
+    pattern (e.g. "/{organization_id}/documents", missing the
+    "/api/v1/organizations" prefix) - not reliable across FastAPI versions.
+    Reconstructing the template from the concrete path plus the path params
+    FastAPI already resolved is robust regardless of that internal
+    flattening behavior: every matched path parameter's value is replaced
+    with its `{name}` placeholder in the real request path.
+    """
+    if request.scope.get("route") is None:
+        return "unmatched"
+    path = request.url.path
+    for name, value in request.path_params.items():
+        path = path.replace(str(value), f"{{{name}}}")
+    return path
+
+
+@app.middleware("http")
+async def request_observability_middleware(request: Request, call_next):
+    """Request ID + HTTP metrics + access log, in one place per Step 1's
+    "prefer centralized instrumentation" - this is the single choke point
+    every HTTP request passes through exactly once.
+
+    Binds request_id via structlog.contextvars WITHOUT ever clearing it
+    afterward - see app/core/logging.py's docstring and the Phase 7 note it
+    replaced: BaseHTTPMiddleware's call_next() runs the rest of the request
+    (including a StreamingResponse's generator body) in a child asyncio task
+    created *after* this bind, so that task's context is a snapshot that
+    already includes request_id - the generator can log with it correctly
+    even though it executes after this function returns. A fresh HTTP
+    request is always a fresh asyncio Task with its own context, so there is
+    no cross-request leakage to clean up despite never clearing.
+    """
+    structlog.contextvars.clear_contextvars()  # defensive: no leftover state on this task
+    request_id = resolve_request_id(request.headers.get("x-request-id"))
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+
+    http_requests_in_flight.inc()
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    finally:
+        http_requests_in_flight.dec()
+    duration_seconds = time.perf_counter() - start
+
+    route_template = _route_template(request)
+
+    http_requests_total.labels(
+        method=request.method, route=route_template, status_code=str(response.status_code)
+    ).inc()
+    http_request_duration_seconds.labels(method=request.method, route=route_template).observe(
+        duration_seconds
+    )
+
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "http_request",
+        method=request.method,
+        route=route_template,
+        status_code=response.status_code,
+        duration_ms=round(duration_seconds * 1000, 2),
+    )
+    return response
+
 
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
@@ -100,4 +198,5 @@ async def security_headers_middleware(request: Request, call_next):
 register_exception_handlers(app)
 
 app.include_router(health_router)
+app.include_router(metrics_router)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)

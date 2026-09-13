@@ -20,6 +20,7 @@ handling across Redis replicas). That's an appropriate tradeoff for this
 project's scale, not a claim of production-grade distributed rate limiting.
 """
 
+import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -28,25 +29,42 @@ from redis.asyncio import Redis
 
 from app.core.config import settings
 from app.core.exceptions import RateLimitedError
+from app.core.metrics import (
+    rate_limit_allowed_total,
+    rate_limit_rejected_total,
+    redis_errors_total,
+    redis_operation_duration_seconds,
+)
 
 
-async def _check_and_increment(key: str, max_requests: int, window_seconds: int) -> None:
+async def _check_and_increment(
+    key_prefix: str, key: str, max_requests: int, window_seconds: int
+) -> None:
     # Deliberately not a module-level singleton: a cached connection pool is
     # bound to the event loop that created it, which breaks under
     # pytest-asyncio's per-test event loops (and would equally break any
     # other multi-loop deployment). Redis.from_url() is cheap - it does not
     # eagerly open a socket, only the first command does.
     redis: Redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    start = time.perf_counter()
     try:
         count = await redis.incr(key)
         if count == 1:
             await redis.expire(key, window_seconds)
+    except Exception:
+        redis_errors_total.labels(operation="rate_limit_incr").inc()
+        raise
     finally:
+        redis_operation_duration_seconds.labels(operation="rate_limit_incr").observe(
+            time.perf_counter() - start
+        )
         await redis.aclose()
     if count > max_requests:
+        rate_limit_rejected_total.labels(endpoint=key_prefix).inc()
         raise RateLimitedError(
             "Too many requests. Please try again later.", code="RATE_LIMITED"
         )
+    rate_limit_allowed_total.labels(endpoint=key_prefix).inc()
 
 
 def rate_limit(
@@ -55,7 +73,7 @@ def rate_limit(
     async def dependency(request: Request) -> None:
         client_ip = request.client.host if request.client else "unknown"
         key = f"ratelimit:{key_prefix}:ip:{client_ip}"
-        await _check_and_increment(key, max_requests, window_seconds)
+        await _check_and_increment(key_prefix, key, max_requests, window_seconds)
 
     return dependency
 
@@ -71,6 +89,6 @@ def rate_limit_for_user(
 
     async def dependency(current_user: User = Depends(get_current_user)) -> None:
         key = f"ratelimit:{key_prefix}:user:{current_user.id}"
-        await _check_and_increment(key, max_requests, window_seconds)
+        await _check_and_increment(key_prefix, key, max_requests, window_seconds)
 
     return dependency

@@ -10,6 +10,8 @@ earlier bug - a module-level singleton here is fine.
 """
 
 import asyncio
+import time
+from contextlib import contextmanager
 from functools import lru_cache
 
 import boto3
@@ -19,8 +21,38 @@ from botocore.exceptions import ClientError
 from app.core.config import settings
 from app.core.exceptions import StorageError, StorageObjectNotFoundError
 from app.core.logging import get_logger
+from app.core.metrics import (
+    storage_errors_total,
+    storage_request_duration_seconds,
+    storage_requests_total,
+)
+from app.core.telemetry import get_tracer
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
+
+
+@contextmanager
+def _instrument(operation: str):
+    """Records storage_requests_total/duration/errors and a span around one
+    S3/MinIO call. `operation` is always one of the four fixed literals
+    passed at each call site below (upload/download/delete/presign) - never
+    derived from the object key, which stays out of every label per the
+    cardinality policy in app/core/metrics.py."""
+    start = time.perf_counter()
+    with tracer.start_as_current_span(f"storage.{operation}"):
+        try:
+            yield
+        except Exception:
+            storage_requests_total.labels(operation=operation, status="failure").inc()
+            storage_errors_total.labels(operation=operation).inc()
+            raise
+        else:
+            storage_requests_total.labels(operation=operation, status="success").inc()
+        finally:
+            storage_request_duration_seconds.labels(operation=operation).observe(
+                time.perf_counter() - start
+            )
 
 
 def _escape_content_disposition_filename(filename: str) -> str:
@@ -62,61 +94,65 @@ class S3StorageProvider:
         self._bucket = settings.S3_BUCKET
 
     async def upload(self, key: str, data: bytes, content_type: str) -> None:
-        try:
-            await asyncio.to_thread(
-                self._client.put_object,
-                Bucket=self._bucket,
-                Key=key,
-                Body=data,
-                ContentType=content_type,
-            )
-        except ClientError as exc:
-            logger.error("storage_upload_failed", key=key, exc_info=exc)
-            raise StorageError("Failed to store the uploaded file.") from exc
+        with _instrument("upload"):
+            try:
+                await asyncio.to_thread(
+                    self._client.put_object,
+                    Bucket=self._bucket,
+                    Key=key,
+                    Body=data,
+                    ContentType=content_type,
+                )
+            except ClientError as exc:
+                logger.error("storage_upload_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to store the uploaded file.") from exc
 
     async def download(self, key: str) -> bytes:
-        try:
-            response = await asyncio.to_thread(
-                self._client.get_object, Bucket=self._bucket, Key=key
-            )
-            body = response["Body"]
-            return await asyncio.to_thread(body.read)
-        except ClientError as exc:
-            error_code = exc.response.get("Error", {}).get("Code", "")
-            if error_code in ("NoSuchKey", "404"):
-                raise StorageObjectNotFoundError(
-                    "The stored file could not be found."
-                ) from exc
-            logger.error("storage_download_failed", key=key, exc_info=exc)
-            raise StorageError("Failed to read the stored file.") from exc
+        with _instrument("download"):
+            try:
+                response = await asyncio.to_thread(
+                    self._client.get_object, Bucket=self._bucket, Key=key
+                )
+                body = response["Body"]
+                return await asyncio.to_thread(body.read)
+            except ClientError as exc:
+                error_code = exc.response.get("Error", {}).get("Code", "")
+                if error_code in ("NoSuchKey", "404"):
+                    raise StorageObjectNotFoundError(
+                        "The stored file could not be found."
+                    ) from exc
+                logger.error("storage_download_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to read the stored file.") from exc
 
     async def delete(self, key: str) -> None:
-        try:
-            await asyncio.to_thread(
-                self._client.delete_object, Bucket=self._bucket, Key=key
-            )
-        except ClientError as exc:
-            logger.error("storage_delete_failed", key=key, exc_info=exc)
-            raise StorageError("Failed to delete the stored file.") from exc
+        with _instrument("delete"):
+            try:
+                await asyncio.to_thread(
+                    self._client.delete_object, Bucket=self._bucket, Key=key
+                )
+            except ClientError as exc:
+                logger.error("storage_delete_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to delete the stored file.") from exc
 
     async def generate_presigned_download_url(
         self, key: str, filename: str, expires_in: int
     ) -> str:
         safe_filename = _escape_content_disposition_filename(filename)
-        try:
-            return await asyncio.to_thread(
-                self._public_client.generate_presigned_url,
-                "get_object",
-                Params={
-                    "Bucket": self._bucket,
-                    "Key": key,
-                    "ResponseContentDisposition": f'attachment; filename="{safe_filename}"',
-                },
-                ExpiresIn=expires_in,
-            )
-        except ClientError as exc:
-            logger.error("storage_presign_failed", key=key, exc_info=exc)
-            raise StorageError("Failed to generate a download link.") from exc
+        with _instrument("presign"):
+            try:
+                return await asyncio.to_thread(
+                    self._public_client.generate_presigned_url,
+                    "get_object",
+                    Params={
+                        "Bucket": self._bucket,
+                        "Key": key,
+                        "ResponseContentDisposition": f'attachment; filename="{safe_filename}"',
+                    },
+                    ExpiresIn=expires_in,
+                )
+            except ClientError as exc:
+                logger.error("storage_presign_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to generate a download link.") from exc
 
     def ensure_bucket_exists(self) -> None:
         """Best-effort startup helper - MinIO doesn't auto-create buckets like

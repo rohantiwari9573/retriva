@@ -223,6 +223,58 @@ async def test_unexpected_exception_never_leaks_raw_message(fake_storage, monkey
 
     await _run_task(document_id)
 
+
+def _counter_value(metric, **labels) -> float:
+    return metric.labels(**labels)._value.get()  # noqa: SLF001 - test-only introspection
+
+
+async def test_successful_run_increments_success_metrics(fake_storage, monkeypatch, _cleanup):
+    from app.core.metrics import celery_tasks_total, document_processing_total
+    from app.rag.embedding.testing import DeterministicTestEmbeddingProvider
+    from app.workers.tasks.document_processing import _TASK_NAME
+
+    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(
+        document_processing,
+        "get_embedding_provider",
+        lambda: DeterministicTestEmbeddingProvider(dimensions=768),
+    )
+    before = _counter_value(document_processing_total, status="success")
+    before_task = _counter_value(celery_tasks_total, task_name=_TASK_NAME, status="success")
+
+    document_id = await _make_document(fake_storage)
+    _cleanup.append((await _fetch(document_id)).organization_id)
+    await _run_task(document_id)
+
+    assert (await _fetch(document_id)).status == DocumentStatus.READY
+    assert _counter_value(document_processing_total, status="success") == before + 1
+    assert (
+        _counter_value(celery_tasks_total, task_name=_TASK_NAME, status="success")
+        == before_task + 1
+    )
+
+
+async def test_permanent_failure_increments_failure_metrics(
+    fake_storage, monkeypatch, _cleanup
+):
+    from app.core.metrics import celery_task_failures_total, document_processing_total
+    from app.workers.tasks.document_processing import _TASK_NAME
+
+    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(
+        document_processing, "get_embedding_provider", lambda: _AlwaysPermanentProvider()
+    )
+    before = _counter_value(document_processing_total, status="failure")
+    before_task = _counter_value(celery_task_failures_total, task_name=_TASK_NAME)
+
+    document_id = await _make_document(fake_storage)
+    _cleanup.append((await _fetch(document_id)).organization_id)
+    await _run_task(document_id)
+
+    assert (await _fetch(document_id)).status == DocumentStatus.FAILED
+    assert _counter_value(document_processing_total, status="failure") == before + 1
+    assert _counter_value(celery_task_failures_total, task_name=_TASK_NAME) == before_task + 1
+
     refreshed = await _fetch(document_id)
     assert refreshed.status == DocumentStatus.FAILED
     assert "secret" not in refreshed.failure_reason

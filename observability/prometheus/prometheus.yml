@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  # Docker Compose service discovery: service names resolve via the compose
+  # network's built-in DNS, same as every other inter-service URL in this
+  # project (S3_ENDPOINT_URL=http://minio:9000, etc.) - no separate service
+  # discovery mechanism needed for a fixed, small set of services.
+  - job_name: nexus-backend
+    static_configs:
+      - targets: ["backend:8000"]
+    metrics_path: /metrics
+
+  # The worker has no HTTP server of its own for application traffic (see
+  # docker-compose.yml's healthcheck comment) - app/workers/celery_app.py's
+  # worker_process_init handler opens a dedicated prometheus_client HTTP
+  # server on this port purely so celery_*/document_processing_* metrics
+  # (recorded in app/workers/tasks/document_processing.py, which only ever
+  # runs inside the worker process) have somewhere to be scraped from.
+  - job_name: nexus-worker
+    static_configs:
+      - targets: ["worker:9808"]
+    metrics_path: /

@@ -51,6 +51,8 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "8000:8000"
     depends_on:
@@ -77,8 +79,20 @@ services:
       context: ./backend
       target: runtime
     restart: unless-stopped
-    command: celery -A app.workers.celery_app worker --loglevel=info
+    # --concurrency=1: see app/workers/celery_app.py's worker_process_init
+    # handler - a single worker process keeps its in-memory Prometheus
+    # registry complete, whereas Celery's default multi-process prefork pool
+    # would silently split celery_*/document_processing_* counts across
+    # processes with no metrics server for the ones this container's own
+    # start_http_server() doesn't happen to be running in. An accepted
+    # concurrency-vs-metrics-correctness tradeoff for this project's scale -
+    # see docs/observability.md.
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1
     env_file: .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    expose:
+      - "9808"
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,6 +123,69 @@ services:
     depends_on:
       - backend
 
+  # --- Observability stack (Phase 8) ---
+  # Opt-in via `docker compose --profile observability up` - the core
+  # platform (postgres/redis/minio/backend/worker/frontend, above) never
+  # depends on any of these three, and OTEL_ENABLED/PROMETHEUS_ENABLED
+  # failing open means `docker compose up` (no profile) runs Nexus exactly
+  # as before Phase 8. See docs/observability.md "Local startup".
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      # Local-dev-only default credential, same posture as MinIO's
+      # minioadmin/minioadmin - never used outside this Compose file, and
+      # documented as such in docs/observability.md and docs/security.md.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317" # OTLP/gRPC - what OTEL_EXPORTER_OTLP_ENDPOINT points at
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:16686 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
   minio_data:
+  prometheus_data:
+  grafana_data:

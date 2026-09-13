@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+from app.core.metrics import db_pool_checked_out, db_pool_overflow, db_pool_size
 
 
 class Base(DeclarativeBase):
@@ -29,6 +30,19 @@ AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     expire_on_commit=False,
     autoflush=False,
+)
+
+# Gauges evaluated lazily at scrape time (set_function), not updated on every
+# checkout/checkin - the pool object is the single source of truth and this
+# avoids a metrics call on every single query. NullPool-backed engines (the
+# per-Celery-task engine in app/workers/tasks/document_processing.py) aren't
+# covered here since they're short-lived and never share this module's pool.
+db_pool_size.set_function(lambda: engine.sync_engine.pool.size())  # type: ignore[attr-defined]
+db_pool_checked_out.set_function(
+    lambda: engine.sync_engine.pool.checkedout()  # type: ignore[attr-defined]
+)
+db_pool_overflow.set_function(
+    lambda: engine.sync_engine.pool.overflow()  # type: ignore[attr-defined]
 )
 
 

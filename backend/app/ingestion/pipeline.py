@@ -17,6 +17,7 @@ duration of processing, so two workers that somehow both pick up the same
 document_id serialize instead of racing to delete/insert each other's rows.
 """
 
+import time
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -25,6 +26,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.core.exceptions import StorageError, StorageObjectNotFoundError
 from app.core.logging import get_logger
+from app.core.metrics import (
+    document_chunk_duration_seconds,
+    document_embedding_duration_seconds,
+    document_parse_duration_seconds,
+    document_persist_duration_seconds,
+    document_processing_duration_seconds,
+)
+from app.core.telemetry import get_tracer
 from app.ingestion.chunking import chunk_document
 from app.ingestion.errors import (
     EmptyDocumentError,
@@ -45,6 +54,7 @@ from app.repositories.document_chunk_repository import DocumentChunkRepository
 from app.storage.base import StorageProvider
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 async def process_document_pipeline(
@@ -74,101 +84,126 @@ async def process_document_pipeline(
             logger.info("document_processing_skipped_already_ready", document_id=document_id)
             return
 
-        await assert_embedding_dimension_matches(session, embedding_provider.dimensions)
+        pipeline_start = time.perf_counter()
+        with tracer.start_as_current_span("document.processing") as processing_span:
+            processing_span.set_attribute("document.mime_type", document.mime_type)
+            await assert_embedding_dimension_matches(session, embedding_provider.dimensions)
 
-        chunk_repo = DocumentChunkRepository(session)
-        await chunk_repo.delete_for_document(document.id)
+            chunk_repo = DocumentChunkRepository(session)
+            await chunk_repo.delete_for_document(document.id)
 
-        document.status = DocumentStatus.PROCESSING
-        document.processing_started_at = datetime.now(UTC)
-        document.failure_reason = None
-        await session.flush()
+            document.status = DocumentStatus.PROCESSING
+            document.processing_started_at = datetime.now(UTC)
+            document.failure_reason = None
+            await session.flush()
 
-        logger.info(
-            "document_processing_started",
-            document_id=str(document.id),
-            organization_id=str(document.organization_id),
-            mime_type=document.mime_type,
-        )
-
-        try:
-            data = await storage.download(document.storage_key)
-        except StorageObjectNotFoundError as exc:
-            raise PermanentProcessingError(str(exc)) from exc
-        except StorageError as exc:
-            raise TransientProcessingError(str(exc)) from exc
-
-        parser = get_parser_for_mime_type(document.mime_type)
-        parsed = parser.parse(data)
-
-        if not parsed.elements:
-            raise EmptyDocumentError("Document contains no extractable text.")
-
-        # Parser-specific limits (page count, zip-bomb size) bound the input
-        # shape, but a pathological document can still normalize into an
-        # enormous amount of extracted text within those limits (e.g. a
-        # Markdown file that is one repeated character for the full byte
-        # budget). Bound the actual text volume that reaches chunking/
-        # embedding, independent of which parser produced it.
-        total_text_length = sum(len(el.text) for el in parsed.elements)
-        if total_text_length > settings.MAX_DOCUMENT_TEXT_LENGTH:
-            raise PermanentProcessingError(
-                f"Document contains {total_text_length} characters of extracted "
-                f"text, exceeding the {settings.MAX_DOCUMENT_TEXT_LENGTH}-character "
-                "processing limit."
+            logger.info(
+                "document_processing_started",
+                document_id=str(document.id),
+                organization_id=str(document.organization_id),
+                mime_type=document.mime_type,
             )
 
-        chunks = chunk_document(
-            parsed,
-            chunk_size_tokens=settings.CHUNK_SIZE_TOKENS,
-            chunk_overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
-        )
+            try:
+                data = await storage.download(document.storage_key)
+            except StorageObjectNotFoundError as exc:
+                raise PermanentProcessingError(str(exc)) from exc
+            except StorageError as exc:
+                raise TransientProcessingError(str(exc)) from exc
 
-        if not chunks:
-            raise EmptyDocumentError("Document contains no extractable text.")
+            with tracer.start_as_current_span("document.parse"):
+                parse_start = time.perf_counter()
+                parser = get_parser_for_mime_type(document.mime_type)
+                parsed = parser.parse(data)
+                document_parse_duration_seconds.labels(document_type=document.mime_type).observe(
+                    time.perf_counter() - parse_start
+                )
 
-        if len(chunks) > settings.MAX_CHUNKS_PER_DOCUMENT:
-            raise PermanentProcessingError(
-                f"Document produced {len(chunks)} chunks, exceeding the "
-                f"{settings.MAX_CHUNKS_PER_DOCUMENT}-chunk processing limit."
-            )
+            if not parsed.elements:
+                raise EmptyDocumentError("Document contains no extractable text.")
 
-        try:
-            vectors = await embedding_provider.embed_documents([c.content for c in chunks])
-        except EmbeddingDimensionMismatchError as exc:
-            raise PermanentProcessingError(str(exc)) from exc
-        except EmbeddingProviderUnavailableError as exc:
-            raise TransientProcessingError(str(exc)) from exc
+            # Parser-specific limits (page count, zip-bomb size) bound the
+            # input shape, but a pathological document can still normalize
+            # into an enormous amount of extracted text within those limits
+            # (e.g. a Markdown file that is one repeated character for the
+            # full byte budget). Bound the actual text volume that reaches
+            # chunking/embedding, independent of which parser produced it.
+            total_text_length = sum(len(el.text) for el in parsed.elements)
+            if total_text_length > settings.MAX_DOCUMENT_TEXT_LENGTH:
+                raise PermanentProcessingError(
+                    f"Document contains {total_text_length} characters of extracted "
+                    f"text, exceeding the {settings.MAX_DOCUMENT_TEXT_LENGTH}-character "
+                    "processing limit."
+                )
 
-        if len(vectors) != len(chunks):
-            raise PermanentProcessingError(
-                f"Embedding provider returned {len(vectors)} vectors for "
-                f"{len(chunks)} chunks."
-            )
+            with tracer.start_as_current_span("document.chunk") as chunk_span:
+                chunk_start = time.perf_counter()
+                chunks = chunk_document(
+                    parsed,
+                    chunk_size_tokens=settings.CHUNK_SIZE_TOKENS,
+                    chunk_overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
+                )
+                document_chunk_duration_seconds.observe(time.perf_counter() - chunk_start)
+                chunk_span.set_attribute("document.chunk_count", len(chunks))
 
-        chunk_rows = [
-            DocumentChunk(
-                document_id=document.id,
-                chunk_index=chunk.chunk_index,
-                content=chunk.content,
-                page_number=chunk.page_number,
-                section=chunk.section,
-                char_count=chunk.char_count,
-                token_count=chunk.token_count,
-                content_hash=chunk.content_hash,
-                embedding=vector,
-            )
-            for chunk, vector in zip(chunks, vectors, strict=True)
-        ]
-        await chunk_repo.bulk_create(chunk_rows)
+            if not chunks:
+                raise EmptyDocumentError("Document contains no extractable text.")
 
-        document.status = DocumentStatus.READY
-        document.chunk_count = len(chunk_rows)
-        document.embedding_model = embedding_provider.model
-        document.embedding_dimension = embedding_provider.dimensions
-        document.processing_completed_at = datetime.now(UTC)
+            if len(chunks) > settings.MAX_CHUNKS_PER_DOCUMENT:
+                raise PermanentProcessingError(
+                    f"Document produced {len(chunks)} chunks, exceeding the "
+                    f"{settings.MAX_CHUNKS_PER_DOCUMENT}-chunk processing limit."
+                )
 
-        await session.commit()
+            with tracer.start_as_current_span("document.embed"):
+                embed_start = time.perf_counter()
+                try:
+                    vectors = await embedding_provider.embed_documents(
+                        [c.content for c in chunks]
+                    )
+                except EmbeddingDimensionMismatchError as exc:
+                    raise PermanentProcessingError(str(exc)) from exc
+                except EmbeddingProviderUnavailableError as exc:
+                    raise TransientProcessingError(str(exc)) from exc
+                document_embedding_duration_seconds.observe(time.perf_counter() - embed_start)
+
+            if len(vectors) != len(chunks):
+                raise PermanentProcessingError(
+                    f"Embedding provider returned {len(vectors)} vectors for "
+                    f"{len(chunks)} chunks."
+                )
+
+            with tracer.start_as_current_span("document.persist"):
+                persist_start = time.perf_counter()
+                chunk_rows = [
+                    DocumentChunk(
+                        document_id=document.id,
+                        chunk_index=chunk.chunk_index,
+                        content=chunk.content,
+                        page_number=chunk.page_number,
+                        section=chunk.section,
+                        char_count=chunk.char_count,
+                        token_count=chunk.token_count,
+                        content_hash=chunk.content_hash,
+                        embedding=vector,
+                    )
+                    for chunk, vector in zip(chunks, vectors, strict=True)
+                ]
+                await chunk_repo.bulk_create(chunk_rows)
+
+                document.status = DocumentStatus.READY
+                document.chunk_count = len(chunk_rows)
+                document.embedding_model = embedding_provider.model
+                document.embedding_dimension = embedding_provider.dimensions
+                document.processing_completed_at = datetime.now(UTC)
+
+                await session.commit()
+                document_persist_duration_seconds.observe(time.perf_counter() - persist_start)
+
+            processing_span.set_attribute("document.processing.status", "success")
+            processing_span.set_attribute("document.chunk_count", len(chunk_rows))
+
+        document_processing_duration_seconds.observe(time.perf_counter() - pipeline_start)
 
         logger.info(
             "document_processing_completed",

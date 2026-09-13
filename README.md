@@ -4,13 +4,14 @@ Multi-tenant RAG platform for organizations to upload internal documents and ask
 questions against them, with hybrid retrieval, verified citations, and
 streaming multi-turn conversations.
 
-> **Status:** Phase 7 (security + reliability hardening) complete. See
-> `docs/rag.md` and `docs/retrieval.md` for the core RAG pipeline,
-> `docs/streaming.md` for conversational RAG/streaming, `docs/security.md`
-> for the security model and threat model, and `docs/architecture.md` /
-> `docs/system-design.md` for the system-wide view. This README covers
-> local setup and what's implemented so far; it grows into full project
-> documentation in Phase 12.
+> **Status:** Phase 8 (production observability + distributed diagnostics)
+> complete. See `docs/rag.md` and `docs/retrieval.md` for the core RAG
+> pipeline, `docs/streaming.md` for conversational RAG/streaming,
+> `docs/security.md` for the security model and threat model,
+> `docs/observability.md` for structured logging/metrics/tracing, and
+> `docs/architecture.md` / `docs/system-design.md` for the system-wide
+> view. This README covers local setup and what's implemented so far; it
+> grows into full project documentation in Phase 12.
 
 ## Implemented so far
 
@@ -60,12 +61,19 @@ streaming multi-turn conversations.
   document is `PROCESSING` and shows a retry action on `FAILED`. `/chat`
   streams answers live, shows citations inline as clickable source chips
   with a detail panel, and supports stop/regenerate/copy on responses.
+- **Observability:** structured JSON logging with request-ID/trace-ID
+  correlation, Prometheus metrics (`/metrics`) across HTTP/RAG/LLM/
+  streaming/ingestion/Celery/security events, and OpenTelemetry distributed
+  tracing exported to Jaeger - all opt-in via a Compose profile, all
+  fail-open (Nexus runs identically with the whole stack turned off). See
+  `docs/observability.md`.
 
 ## Stack
 
 - **Backend:** FastAPI, SQLAlchemy 2.x (async), Alembic, PostgreSQL + pgvector, Redis, Celery
 - **Frontend:** Next.js 16 (App Router), TypeScript, Tailwind CSS v4, shadcn/ui, TanStack Query
 - **Infra:** Docker Compose, MinIO (local S3), GitHub Actions CI
+- **Observability:** Prometheus, Grafana, Jaeger, OpenTelemetry - all local/free (see `docs/observability.md`)
 
 ## Local Setup
 
@@ -81,6 +89,21 @@ docker compose up --build
 - Backend: http://localhost:8000 (docs at `/docs`)
 - Frontend: http://localhost:3000
 - MinIO console: http://localhost:9001 (minioadmin/minioadmin)
+
+To also run the observability stack (Prometheus, Grafana, Jaeger - all
+opt-in, never required for the core platform):
+
+```bash
+docker compose --profile observability up --build
+```
+
+- Backend metrics: http://localhost:8000/metrics
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3001 (admin/admin - local dev only)
+- Jaeger UI: http://localhost:16686
+
+See `docs/observability.md` for the full metric catalogue, dashboard list,
+and a worked "why is this chat request slow" trace-debugging example.
 
 **Note (Windows):** if you have a native PostgreSQL install, it likely already
 owns port 5432. The Postgres container in `docker-compose.yml` publishes on host
@@ -239,6 +262,9 @@ system has not been third-party penetration-tested.
   behavior, and pgvector schema.
 - [`docs/security.md`](docs/security.md) - the Phase 7 security model and
   threat model.
+- [`docs/observability.md`](docs/observability.md) - the Phase 8 logging/
+  metrics/tracing architecture, metric catalogue, cardinality and sensitive-
+  data policies, and a worked trace-debugging example.
 - API reference, RAG evaluation write-up, interview prep, and resume
   bullets land in `docs/` starting Phase 12, and are updated incrementally
   as each phase is implemented.

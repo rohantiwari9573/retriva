@@ -11,8 +11,30 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.core.logging import get_logger
+from app.core.metrics import (
+    auth_failures_total,
+    authorization_denied_total,
+    invalid_input_total,
+    upload_rejections_total,
+)
 
 logger = get_logger(__name__)
+
+# Bounded sets of AppError.code values that map to a Phase 8 operational
+# security counter - see app/core/metrics.py's cardinality policy. Every
+# value here is a fixed string literal already used at its raise site
+# (app/services/auth_service.py, app/api/v1/deps.py,
+# app/services/file_validation.py); this mapping never sees a value it
+# didn't itself enumerate.
+_AUTH_FAILURE_CODES = {
+    "NOT_AUTHENTICATED",
+    "TOKEN_EXPIRED",
+    "TOKEN_INVALID",
+    "TOKEN_REVOKED",
+    "INVALID_CREDENTIALS",
+    "ACCOUNT_INACTIVE",
+}
+_UPLOAD_REJECTION_CODES = {"FILE_TOO_LARGE", "UNSUPPORTED_FILE_TYPE"}
 
 
 class AppError(Exception):
@@ -129,6 +151,15 @@ class StorageObjectNotFoundError(StorageError):
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        # Centralized operational security counters (Phase 8, Step 22) - one
+        # choke point for every AppError, rather than instrumenting each of
+        # the dozen call sites that can raise one of these codes.
+        if exc.code in _AUTH_FAILURE_CODES:
+            auth_failures_total.labels(reason=exc.code).inc()
+        elif exc.code == "INSUFFICIENT_ROLE":
+            authorization_denied_total.inc()
+        elif exc.code in _UPLOAD_REJECTION_CODES:
+            upload_rejections_total.labels(reason=exc.code).inc()
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"code": exc.code, "message": exc.message}},
@@ -138,6 +169,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        invalid_input_total.inc()
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={

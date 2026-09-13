@@ -1,0 +1,54 @@
+{
+  "title": "Nexus - LLM",
+  "uid": "nexus-llm",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "tags": ["nexus"],
+  "panels": [
+    {
+      "id": 1, "title": "LLM requests (success/failure)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(llm_requests_total[5m])) by (status, streaming)", "legendFormat": "{{status}} streaming={{streaming}}" }]
+    },
+    {
+      "id": 2, "title": "LLM failures by reason", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(llm_failures_total[5m])) by (reason)", "legendFormat": "{{reason}}" }]
+    },
+    {
+      "id": 3, "title": "Time to first token (p50/p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(llm_time_to_first_token_seconds_bucket[5m])) by (le))", "legendFormat": "TTFT p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(llm_time_to_first_token_seconds_bucket[5m])) by (le))", "legendFormat": "TTFT p95" }
+      ]
+    },
+    {
+      "id": 4, "title": "Generation latency (p50/p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" }
+      ]
+    },
+    {
+      "id": 5, "title": "Interrupted streams", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(stream_interrupted_total[5m])) by (reason)", "legendFormat": "{{reason}}" }]
+    },
+    {
+      "id": 6, "title": "Tokens generated/sec", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(llm_tokens_generated_total[5m])) by (provider)", "legendFormat": "{{provider}}" }]
+    }
+  ]
+}

@@ -27,6 +27,7 @@ latency-sensitive per-call.
 """
 
 import asyncio
+import time
 from datetime import UTC, datetime
 
 import structlog
@@ -42,6 +43,13 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import (
+    celery_task_duration_seconds,
+    celery_task_failures_total,
+    celery_task_retries_total,
+    celery_tasks_total,
+    document_processing_total,
+)
 from app.ingestion.errors import (
     DocumentProcessingError,
     PermanentProcessingError,
@@ -55,6 +63,8 @@ from app.storage.dependency import get_storage_provider
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
+
+_TASK_NAME = "app.workers.tasks.document_processing.process_document"
 
 
 class _RetryRequested(Exception):
@@ -126,10 +136,19 @@ async def _run_pipeline(document_id: str) -> None:
 )
 def process_document(self, document_id: str) -> None:
     structlog.contextvars.bind_contextvars(document_id=document_id, task_id=self.request.id)
+    # "success" unless overwritten below - the happy path falls through the
+    # whole try block with no exception at all, so it never explicitly sets
+    # this itself. "retry"/"failure" are set in the branch that determines
+    # them, then read once in the finally block below, which is the single
+    # choke point for celery_tasks_total/celery_task_duration_seconds/
+    # document_processing_total regardless of which branch was taken.
+    outcome = "success"
+    task_start = time.perf_counter()
     try:
         logger.info("document_processing_task_received", attempt=self.request.retries + 1)
         asyncio.run(_run_pipeline(document_id))
     except _RetryRequested as exc:
+        outcome = "retry"
         countdown = settings.DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS * (
             2**self.request.retries
         )
@@ -156,8 +175,10 @@ def process_document(self, document_id: str) -> None:
                 max_retries=settings.DOCUMENT_PROCESSING_MAX_RETRIES,
             )
         except Retry:
+            celery_task_retries_total.labels(task_name=_TASK_NAME).inc()
             raise
         except Exception as exhausted:  # noqa: BLE001
+            outcome = "failure"
             reason = f"Processing failed after multiple attempts: {exc.original}"
             asyncio.run(_mark_failed(document_id, reason, self.request.retries))
             logger.error(
@@ -167,17 +188,20 @@ def process_document(self, document_id: str) -> None:
                 exhausted_via=type(exhausted).__name__,
             )
     except PermanentProcessingError as exc:
+        outcome = "failure"
         asyncio.run(_mark_failed(document_id, str(exc), self.request.retries))
         logger.error("document_processing_failed_permanent", reason=str(exc))
     except DocumentProcessingError as exc:
         # Any pipeline error not explicitly classified transient/permanent -
         # fail closed rather than retry indefinitely.
+        outcome = "failure"
         asyncio.run(_mark_failed(document_id, str(exc), self.request.retries))
         logger.error("document_processing_failed_unclassified", reason=str(exc))
     except Exception as exc:  # noqa: BLE001 - last-resort safety net
         # Never leak the raw exception message to the document's public
         # failure_reason - it could contain a file path, connection string
         # fragment, or other internal detail. Full detail goes to the log only.
+        outcome = "failure"
         asyncio.run(
             _mark_failed(
                 document_id,
@@ -187,4 +211,13 @@ def process_document(self, document_id: str) -> None:
         )
         logger.error("document_processing_failed_unexpected", exc_info=exc)
     finally:
+        celery_task_duration_seconds.labels(task_name=_TASK_NAME).observe(
+            time.perf_counter() - task_start
+        )
+        celery_tasks_total.labels(task_name=_TASK_NAME, status=outcome).inc()
+        if outcome == "failure":
+            celery_task_failures_total.labels(task_name=_TASK_NAME).inc()
+            document_processing_total.labels(status="failure").inc()
+        elif outcome == "success":
+            document_processing_total.labels(status="success").inc()
         structlog.contextvars.clear_contextvars()

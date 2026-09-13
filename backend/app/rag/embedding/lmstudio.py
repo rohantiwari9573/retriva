@@ -13,16 +13,26 @@ rate limiting in Phase 2 - would bind its connection pool to whichever loop
 first touched it and break on the next one.
 """
 
+import time
+
 import httpx
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import (
+    embedding_failures_total,
+    embedding_items_total,
+    embedding_request_duration_seconds,
+    embedding_requests_total,
+)
+from app.core.telemetry import get_tracer
 from app.rag.embedding.base import (
     EmbeddingDimensionMismatchError,
     EmbeddingProviderUnavailableError,
 )
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 class LMStudioEmbeddingProvider:
@@ -71,6 +81,26 @@ class LMStudioEmbeddingProvider:
         return result[0]
 
     async def _embed_batch(self, batch: list[str]) -> list[list[float]]:
+        """Instrumentation wrapper (Phase 8) around _embed_batch_impl - the
+        actual network call and its error handling are unchanged below."""
+        provider = settings.EMBEDDING_PROVIDER
+        start = time.perf_counter()
+        with tracer.start_as_current_span("embedding.request") as span:
+            span.set_attribute("llm.provider", provider)
+            try:
+                result = await self._embed_batch_impl(batch)
+            except Exception:
+                embedding_requests_total.labels(provider=provider, status="failure").inc()
+                embedding_failures_total.labels(provider=provider).inc()
+                raise
+            embedding_requests_total.labels(provider=provider, status="success").inc()
+            embedding_request_duration_seconds.labels(provider=provider).observe(
+                time.perf_counter() - start
+            )
+            embedding_items_total.labels(provider=provider).inc(len(batch))
+            return result
+
+    async def _embed_batch_impl(self, batch: list[str]) -> list[list[float]]:
         url = f"{self.base_url}/embeddings"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         payload = {"model": self.model, "input": batch}

@@ -12,9 +12,16 @@ retrieval, and the fallback is always logged with a reason - never hidden.
 """
 
 import asyncio
+import time
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import (
+    rag_query_rewrite_duration_seconds,
+    rag_query_rewrite_fallbacks_total,
+    rag_query_rewrites_total,
+)
+from app.core.telemetry import get_tracer
 from app.rag.llm.base import (
     ChatMessage,
     LLMProvider,
@@ -45,6 +52,26 @@ class LMStudioQueryRewriter:
         self.max_tokens = max_tokens or settings.QUERY_REWRITE_MAX_TOKENS
 
     async def rewrite(
+        self, *, question: str, history: list[ChatMessage]
+    ) -> QueryRewriteResult:
+        """Thin instrumentation wrapper around _rewrite (Phase 8) - the
+        underlying rewrite logic and its fallback semantics are unchanged;
+        this only adds a span + duration/outcome metrics around the one
+        entry point every caller already uses."""
+        tracer = get_tracer(__name__)
+        start = time.perf_counter()
+        with tracer.start_as_current_span("rag.query_rewrite") as span:
+            result = await self._rewrite(question=question, history=history)
+            rag_query_rewrite_duration_seconds.observe(time.perf_counter() - start)
+            rag_query_rewrites_total.labels(used_rewrite=str(result.used_rewrite).lower()).inc()
+            if not result.used_rewrite and result.fallback_reason:
+                rag_query_rewrite_fallbacks_total.labels(reason=result.fallback_reason).inc()
+            span.set_attribute("rag.query_rewrite.used", result.used_rewrite)
+            if result.fallback_reason:
+                span.set_attribute("rag.query_rewrite.fallback_reason", result.fallback_reason)
+            return result
+
+    async def _rewrite(
         self, *, question: str, history: list[ChatMessage]
     ) -> QueryRewriteResult:
         if not settings.QUERY_REWRITE_ENABLED:

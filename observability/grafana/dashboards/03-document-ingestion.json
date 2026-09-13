@@ -1,0 +1,54 @@
+{
+  "title": "Nexus - Document Ingestion",
+  "uid": "nexus-document-ingestion",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "10s",
+  "tags": ["nexus"],
+  "panels": [
+    {
+      "id": 1, "title": "Documents processed (success/failure)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(document_processing_total[5m])) by (status)", "legendFormat": "{{status}}" }]
+    },
+    {
+      "id": 2, "title": "End-to-end processing duration (p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(document_processing_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" }]
+    },
+    {
+      "id": 3, "title": "Parse / chunk duration (p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(document_parse_duration_seconds_bucket[5m])) by (le, document_type))", "legendFormat": "parse {{document_type}}" },
+        { "expr": "histogram_quantile(0.95, sum(rate(document_chunk_duration_seconds_bucket[5m])) by (le))", "legendFormat": "chunk" }
+      ]
+    },
+    {
+      "id": 4, "title": "Embedding duration (p95) + failures", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(document_embedding_duration_seconds_bucket[5m])) by (le))", "legendFormat": "embed p95" },
+        { "expr": "sum(rate(embedding_failures_total[5m])) by (provider)", "legendFormat": "failures: {{provider}}" }
+      ]
+    },
+    {
+      "id": 5, "title": "Celery retry count", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(celery_task_retries_total[5m])) by (task_name)", "legendFormat": "{{task_name}}" }]
+    },
+    {
+      "id": 6, "title": "Persist duration (p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(document_persist_duration_seconds_bucket[5m])) by (le))", "legendFormat": "persist p95" }]
+    }
+  ]
+}

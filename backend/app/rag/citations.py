@@ -15,6 +15,7 @@ model's output.
 import re
 from dataclasses import dataclass
 
+from app.core.metrics import citation_count, citation_invalid_total, citation_validation_total
 from app.rag.context_builder import BuiltContext
 
 _CITATION_TAG_RE = re.compile(r"\[SOURCE-\d+\]")
@@ -44,10 +45,13 @@ def validate_citations(raw_answer: str, context: BuiltContext) -> ValidatedAnswe
     valid_ids = context.source_ids()
     seen: set[str] = set()
     citations: list[Citation] = []
+    invalid_tag_count = 0
 
     def _strip_or_keep(match: re.Match[str]) -> str:
+        nonlocal invalid_tag_count
         tag = match.group(0)[1:-1]  # "[SOURCE-1]" -> "SOURCE-1"
         if tag not in valid_ids:
+            invalid_tag_count += 1
             return ""  # fabricated - remove from the visible answer entirely
         if tag not in seen:
             seen.add(tag)
@@ -72,4 +76,10 @@ def validate_citations(raw_answer: str, context: BuiltContext) -> ValidatedAnswe
     cleaned = _CITATION_TAG_RE.sub(_strip_or_keep, raw_answer)
     # Collapse whitespace left behind by a removed tag (e.g. "claim  ." -> "claim.").
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+    citation_validation_total.inc()
+    if invalid_tag_count:
+        citation_invalid_total.inc(invalid_tag_count)
+    citation_count.observe(len(citations))
+
     return ValidatedAnswer(answer=cleaned, citations=citations)

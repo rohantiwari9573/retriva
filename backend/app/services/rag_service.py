@@ -32,6 +32,19 @@ from app.core.exceptions import (
     RetrievalFailedError,
 )
 from app.core.logging import get_logger
+from app.core.metrics import (
+    llm_time_to_first_token_seconds,
+    rag_context_build_duration_seconds,
+    rag_insufficient_evidence_total,
+    rag_requests_total,
+    stream_completed_total,
+    stream_duration_seconds,
+    stream_failed_total,
+    stream_interrupted_total,
+    stream_requests_total,
+    stream_time_to_first_token_seconds,
+)
+from app.core.telemetry import get_tracer
 from app.models.conversation import Conversation
 from app.models.enums import MessageRole
 from app.models.message import Message
@@ -61,6 +74,7 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 _TITLE_MAX_CHARS = 200
 
@@ -143,14 +157,21 @@ class RAGService:
             retrieval.best_vector_similarity is not None
             and retrieval.best_vector_similarity < settings.RETRIEVAL_MIN_SIMILARITY
         )
+        rag_requests_total.labels(streaming="false").inc()
 
         llm_latency_ms = 0.0
         if insufficient:
+            rag_insufficient_evidence_total.inc()
             answer_text = INSUFFICIENT_EVIDENCE_ANSWER
             citations: list[Citation] = []
             chunks_used = 0
         else:
-            built_context = build_context(retrieval.chunks)
+            with tracer.start_as_current_span("rag.context_build"):
+                context_build_start = time.perf_counter()
+                built_context = build_context(retrieval.chunks)
+                rag_context_build_duration_seconds.observe(
+                    time.perf_counter() - context_build_start
+                )
             messages = build_messages(
                 context_text=built_context.text,
                 question=question,
@@ -168,7 +189,8 @@ class RAGService:
 
             llm_start = time.perf_counter()
             try:
-                raw_answer = await self.llm.generate(messages)
+                with tracer.start_as_current_span("rag.llm_generation"):
+                    raw_answer = await self.llm.generate(messages)
             except LLMProviderTimeoutError as exc:
                 raise LLMTimeoutError(str(exc)) from exc
             except LLMProviderUnavailableError as exc:
@@ -177,12 +199,14 @@ class RAGService:
                 raise LLMUnavailableError(str(exc)) from exc
             llm_latency_ms = (time.perf_counter() - llm_start) * 1000
 
-            validated = validate_citations(raw_answer, built_context)
+            with tracer.start_as_current_span("rag.citation_validation"):
+                validated = validate_citations(raw_answer, built_context)
             if not validated.citations:
                 # The model answered but cited nothing we can verify -
                 # trusting an uncited factual claim is exactly what the
                 # citation mechanism exists to prevent, so this is treated
                 # the same as insufficient evidence rather than returned as-is.
+                rag_insufficient_evidence_total.inc()
                 answer_text = INSUFFICIENT_EVIDENCE_ANSWER
                 citations = []
                 chunks_used = 0
@@ -327,7 +351,35 @@ class RAGService:
         persist assistant message -> citations/message_complete events.
         Both callers have already emitted MessageStartEvent and resolved
         the question + preceding history by this point."""
+        stream_requests_total.inc()
+        try:
+            async for event in self._answer_stream_impl(
+                organization_id=organization_id,
+                resolved_conversation_id=resolved_conversation_id,
+                question=question,
+                history=history,
+            ):
+                yield event
+        except GeneratorExit:
+            # Starlette tears this generator down via aclose() on client
+            # disconnect - GeneratorExit is not an Exception subclass, so it
+            # would otherwise propagate silently past every except clause
+            # below with no operational signal at all. Must re-raise: a
+            # generator that swallows GeneratorExit instead of stopping
+            # raises RuntimeError in the interpreter.
+            stream_interrupted_total.labels(reason="client_disconnect").inc()
+            raise
+
+    async def _answer_stream_impl(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        resolved_conversation_id: uuid.UUID,
+        question: str,
+        history: list[ChatMessage],
+    ) -> AsyncIterator[StreamEvent]:
         total_start = time.perf_counter()
+        rag_requests_total.labels(streaming="true").inc()
 
         # Nothing written since the caller's last commit - release the
         # connection before the (possibly slow) query-rewrite LLM call,
@@ -350,9 +402,11 @@ class RAGService:
                 organization_id=organization_id, query=retrieval_query
             )
         except EmbeddingProviderUnavailableError as exc:
+            stream_failed_total.labels(reason="provider_error").inc()
             yield ErrorEvent(code="EMBEDDING_UNAVAILABLE", message=str(exc))
             return
         except SQLAlchemyError as exc:
+            stream_failed_total.labels(reason="provider_error").inc()
             yield ErrorEvent(code=RetrievalFailedError.code, message=str(exc))
             return
         retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000
@@ -364,6 +418,7 @@ class RAGService:
 
         context_build_start = time.perf_counter()
         if insufficient:
+            rag_insufficient_evidence_total.inc()
             answer_text = INSUFFICIENT_EVIDENCE_ANSWER
             citations: list[Citation] = []
             chunks_used = 0
@@ -372,13 +427,15 @@ class RAGService:
             generation_latency_ms = 0.0
             context_build_latency_ms = (time.perf_counter() - context_build_start) * 1000
         else:
-            built_context = build_context(retrieval.chunks)
-            messages = build_messages(
-                context_text=built_context.text,
-                question=question,  # the ORIGINAL question - retrieval_query is retrieval-only
-                conversation_history=history,
-            )
+            with tracer.start_as_current_span("rag.context_build"):
+                built_context = build_context(retrieval.chunks)
+                messages = build_messages(
+                    context_text=built_context.text,
+                    question=question,  # the ORIGINAL question - retrieval_query is retrieval-only
+                    conversation_history=history,
+                )
             context_build_latency_ms = (time.perf_counter() - context_build_start) * 1000
+            rag_context_build_duration_seconds.observe(context_build_latency_ms / 1000)
 
             # Release the connection again before the answer-generation
             # stream, which can run for the bulk of the request.
@@ -397,19 +454,24 @@ class RAGService:
                 # generator's aclose() runs as part of this frame's own
                 # teardown, so cancellation actually propagates into the
                 # provider (closing its httpx stream) instead of leaking it.
-                async with contextlib.aclosing(self.llm.stream(messages)) as token_stream:
-                    async for delta in token_stream:
-                        if first_token_at is None:
-                            first_token_at = time.perf_counter()
-                        deltas.append(delta)
-                        yield TokenEvent(text=delta)
+                with tracer.start_as_current_span("rag.llm_generation") as llm_span:
+                    async with contextlib.aclosing(self.llm.stream(messages)) as token_stream:
+                        async for delta in token_stream:
+                            if first_token_at is None:
+                                first_token_at = time.perf_counter()
+                            deltas.append(delta)
+                            yield TokenEvent(text=delta)
+                    llm_span.set_attribute("llm.streaming", True)
             except LLMProviderTimeoutError as exc:
+                stream_failed_total.labels(reason="timeout").inc()
                 yield ErrorEvent(code="LLM_TIMEOUT", message=str(exc))
                 return
             except LLMProviderUnavailableError as exc:
+                stream_failed_total.labels(reason="provider_error").inc()
                 yield ErrorEvent(code="LLM_UNAVAILABLE", message=str(exc))
                 return
             except (LLMProviderStreamInterruptedError, LLMProviderResponseError) as exc:
+                stream_failed_total.labels(reason="provider_interrupted").inc()
                 yield ErrorEvent(code="LLM_STREAM_INTERRUPTED", message=str(exc))
                 return
             generation_latency_ms = (time.perf_counter() - generation_start) * 1000
@@ -417,9 +479,15 @@ class RAGService:
                 (first_token_at - generation_start) * 1000 if first_token_at is not None else None
             )
             tokens_generated = len(deltas)
+            if ttft_ms is not None:
+                llm_time_to_first_token_seconds.labels(provider=settings.LLM_PROVIDER).observe(
+                    ttft_ms / 1000
+                )
+                stream_time_to_first_token_seconds.observe(ttft_ms / 1000)
 
             raw_answer = "".join(deltas)
-            validated = validate_citations(raw_answer, built_context)
+            with tracer.start_as_current_span("rag.citation_validation"):
+                validated = validate_citations(raw_answer, built_context)
             if not validated.citations:
                 answer_text = INSUFFICIENT_EVIDENCE_ANSWER
                 citations = []
@@ -429,15 +497,16 @@ class RAGService:
                 citations = validated.citations
                 chunks_used = len(built_context.blocks)
 
-        assistant_message = await self.messages.create(
-            conversation_id=resolved_conversation_id,
-            role=MessageRole.ASSISTANT,
-            content=answer_text,
-            citations=[asdict(c) for c in citations] or None,
-            chunks_considered=retrieval.candidates_considered,
-            chunks_used=chunks_used,
-        )
-        await self.db.commit()
+        with tracer.start_as_current_span("message.persist"):
+            assistant_message = await self.messages.create(
+                conversation_id=resolved_conversation_id,
+                role=MessageRole.ASSISTANT,
+                content=answer_text,
+                citations=[asdict(c) for c in citations] or None,
+                chunks_considered=retrieval.candidates_considered,
+                chunks_used=chunks_used,
+            )
+            await self.db.commit()
 
         yield CitationsEvent(citations=citations)
         yield MessageCompleteEvent(
@@ -448,6 +517,8 @@ class RAGService:
         )
 
         total_latency_ms = (time.perf_counter() - total_start) * 1000
+        stream_duration_seconds.observe(total_latency_ms / 1000)
+        stream_completed_total.inc()
         logger.info(
             "chat_stream_completed",
             organization_id=str(organization_id),

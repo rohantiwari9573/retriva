@@ -1,0 +1,42 @@
+{
+  "title": "Nexus - Celery / Workers",
+  "uid": "nexus-celery-workers",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "10s",
+  "tags": ["nexus"],
+  "panels": [
+    {
+      "id": 1, "title": "Task throughput", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(celery_tasks_total[5m])) by (task_name, status)", "legendFormat": "{{task_name}} {{status}}" }]
+    },
+    {
+      "id": 2, "title": "Task failures", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(celery_task_failures_total[5m])) by (task_name)", "legendFormat": "{{task_name}}" }]
+    },
+    {
+      "id": 3, "title": "Task retries", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(celery_task_retries_total[5m])) by (task_name)", "legendFormat": "{{task_name}}" }]
+    },
+    {
+      "id": 4, "title": "Task duration (p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(celery_task_duration_seconds_bucket[5m])) by (le, task_name))", "legendFormat": "{{task_name}} p95" }]
+    },
+    {
+      "id": 5, "title": "Document processing failures", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(document_processing_total{status=\"failure\"}[5m]))", "legendFormat": "failures/sec" }]
+    }
+  ]
+}

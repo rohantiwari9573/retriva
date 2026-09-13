@@ -1,0 +1,66 @@
+{
+  "title": "Nexus - Security / Reliability",
+  "uid": "nexus-security-reliability",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "10s",
+  "tags": ["nexus"],
+  "panels": [
+    {
+      "id": 1, "title": "Auth failures", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(auth_failures_total[5m])) by (reason)", "legendFormat": "{{reason}}" }]
+    },
+    {
+      "id": 2, "title": "Authorization denials (RBAC)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(authorization_denied_total[5m]))", "legendFormat": "denied/sec" }]
+    },
+    {
+      "id": 3, "title": "Rate-limit rejections", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(rate_limit_rejected_total[5m])) by (endpoint)", "legendFormat": "{{endpoint}}" }]
+    },
+    {
+      "id": 4, "title": "Upload rejections", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(upload_rejections_total[5m])) by (reason)", "legendFormat": "{{reason}}" }]
+    },
+    {
+      "id": 5, "title": "Provider failures (LLM/embedding)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "sum(rate(llm_failures_total[5m]))", "legendFormat": "LLM" },
+        { "expr": "sum(rate(embedding_failures_total[5m]))", "legendFormat": "embedding" }
+      ]
+    },
+    {
+      "id": 6, "title": "Storage failures", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(storage_errors_total[5m])) by (operation)", "legendFormat": "{{operation}}" }]
+    },
+    {
+      "id": 7, "title": "Invalid input (validation errors)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "sum(rate(invalid_input_total[5m]))", "legendFormat": "invalid/sec" }]
+    },
+    {
+      "id": 8, "title": "DB pool usage", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "db_pool_checked_out", "legendFormat": "checked out" },
+        { "expr": "db_pool_overflow", "legendFormat": "overflow" }
+      ]
+    }
+  ]
+}

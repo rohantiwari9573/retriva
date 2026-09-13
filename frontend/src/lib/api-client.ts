@@ -16,7 +16,13 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
-    public details?: ValidationDetail[]
+    public details?: ValidationDetail[],
+    // The backend's X-Request-ID for this response (see docs/observability.md) -
+    // never a trace ID and never shown as one. Purely a diagnostic
+    // convenience: a user can quote it in a bug report so a specific log
+    // line can be found, without this app exposing any backend internals
+    // (stack traces, trace/span IDs) to them.
+    public requestId?: string
   ) {
     super(message);
   }
@@ -41,7 +47,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     const body = await response.json().catch(() => null);
     const code = body?.error?.code ?? "UNKNOWN_ERROR";
     const message = body?.error?.message ?? "Something went wrong. Please try again.";
-    throw new ApiError(response.status, code, message, body?.error?.details);
+    const requestId = response.headers.get("x-request-id") ?? undefined;
+    throw new ApiError(response.status, code, message, body?.error?.details, requestId);
   }
 
   if (response.status === 204) {
