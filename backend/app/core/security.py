@@ -22,6 +22,12 @@ from app.core.config import settings
 
 _password_hasher = PasswordHasher()
 
+# A precomputed hash of an unguessable, never-issued password. Used only so
+# login() can run verify_password's ~100ms Argon2 cost on the "no such user"
+# path too - otherwise response time would distinguish a registered email
+# from an unregistered one even though the error text is identical.
+DUMMY_PASSWORD_HASH = _password_hasher.hash(secrets.token_urlsafe(32))
+
 
 def hash_password(password: str) -> str:
     return _password_hasher.hash(password)

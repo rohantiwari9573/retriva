@@ -104,6 +104,20 @@ async def process_document_pipeline(
         if not parsed.elements:
             raise EmptyDocumentError("Document contains no extractable text.")
 
+        # Parser-specific limits (page count, zip-bomb size) bound the input
+        # shape, but a pathological document can still normalize into an
+        # enormous amount of extracted text within those limits (e.g. a
+        # Markdown file that is one repeated character for the full byte
+        # budget). Bound the actual text volume that reaches chunking/
+        # embedding, independent of which parser produced it.
+        total_text_length = sum(len(el.text) for el in parsed.elements)
+        if total_text_length > settings.MAX_DOCUMENT_TEXT_LENGTH:
+            raise PermanentProcessingError(
+                f"Document contains {total_text_length} characters of extracted "
+                f"text, exceeding the {settings.MAX_DOCUMENT_TEXT_LENGTH}-character "
+                "processing limit."
+            )
+
         chunks = chunk_document(
             parsed,
             chunk_size_tokens=settings.CHUNK_SIZE_TOKENS,

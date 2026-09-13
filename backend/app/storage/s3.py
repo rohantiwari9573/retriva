@@ -23,6 +23,21 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _escape_content_disposition_filename(filename: str) -> str:
+    """RFC 6266 quoted-string escaping for the filename param.
+
+    `filename` is user-supplied (Document.original_filename, only lightly
+    sanitized for printability - see _sanitize_display_filename). A literal
+    `"` would otherwise break out of the quoted parameter, and a raw CR/LF
+    would let it inject additional header content. Backslash-escape both
+    quote and backslash per RFC 6266/2616 quoted-string syntax, and strip
+    control characters outright since they have no legitimate place in a
+    displayed filename.
+    """
+    sanitized = "".join(ch for ch in filename if ch.isprintable())
+    return sanitized.replace("\\", "\\\\").replace('"', '\\"')
+
+
 class S3StorageProvider:
     def __init__(self) -> None:
         self._client = boto3.client(
@@ -87,6 +102,7 @@ class S3StorageProvider:
     async def generate_presigned_download_url(
         self, key: str, filename: str, expires_in: int
     ) -> str:
+        safe_filename = _escape_content_disposition_filename(filename)
         try:
             return await asyncio.to_thread(
                 self._public_client.generate_presigned_url,
@@ -94,7 +110,7 @@ class S3StorageProvider:
                 Params={
                     "Bucket": self._bucket,
                     "Key": key,
-                    "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                    "ResponseContentDisposition": f'attachment; filename="{safe_filename}"',
                 },
                 ExpiresIn=expires_in,
             )

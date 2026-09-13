@@ -43,7 +43,10 @@ async def get_current_user(
     except jwt.InvalidTokenError as exc:
         raise UnauthorizedError("Invalid session.", code="TOKEN_INVALID") from exc
 
-    user_id = uuid.UUID(payload["sub"])
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise UnauthorizedError("Invalid session.", code="TOKEN_INVALID") from exc
     user = await UserRepository(db).get_by_id(user_id)
     if user is None or not user.is_active:
         raise UnauthorizedError("Account not found or inactive.", code="ACCOUNT_INACTIVE")

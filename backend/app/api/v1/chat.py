@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.database import get_db, get_session_factory
 from app.core.exceptions import AppError, NotFoundError
 from app.core.logging import get_logger
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit import rate_limit, rate_limit_for_user
 from app.models.enums import MessageRole, OrgRole
 from app.rag.embedding.base import EmbeddingProvider
 from app.rag.embedding.dependency import get_embedding_provider
@@ -284,6 +284,13 @@ async def delete_conversation(
 @router.post(
     "/{organization_id}/retrieval/debug",
     response_model=RetrievalDebugResponse,
+    dependencies=[
+        Depends(
+            rate_limit_for_user(
+                "retrieval_debug", settings.RATE_LIMIT_RETRIEVAL_DEBUG_PER_MINUTE
+            )
+        )
+    ],
 )
 async def retrieval_debug(
     body: RetrievalDebugRequest,

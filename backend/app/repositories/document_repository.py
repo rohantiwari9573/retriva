@@ -1,6 +1,7 @@
 import uuid
+from typing import cast
 
-from sqlalchemy import func, select
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document
@@ -86,3 +87,31 @@ class DocumentRepository:
 
     async def delete(self, document: Document) -> None:
         await self.db.delete(document)
+
+    async def mark_processing_if_failed(
+        self, document_id: uuid.UUID, org_id: uuid.UUID
+    ) -> bool:
+        """Atomically transition FAILED -> PROCESSING, returning whether this
+        call was the one that made the transition.
+
+        A plain read-then-write (check document.status, then set it) is a
+        TOCTOU race: two concurrent retry requests can both read FAILED
+        before either writes PROCESSING, both enqueue a worker, and the
+        second worker's row-lock wait turns into a second, wasted processing
+        run. The WHERE clause makes Postgres itself the arbiter - only the
+        request whose UPDATE matches a still-FAILED row gets rowcount 1; a
+        concurrent loser gets 0 and must not enqueue anything.
+        """
+        result = cast(
+            CursorResult,
+            await self.db.execute(
+                update(Document)
+                .where(
+                    Document.id == document_id,
+                    Document.organization_id == org_id,
+                    Document.status == DocumentStatus.FAILED,
+                )
+                .values(status=DocumentStatus.PROCESSING, failure_reason=None)
+            ),
+        )
+        return result.rowcount == 1

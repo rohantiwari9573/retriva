@@ -1,20 +1,52 @@
 """Redis fixed-window rate limiter.
 
 A dedicated package (slowapi, etc.) wasn't worth the dependency for a single
-INCR+EXPIRE pattern. Keyed by client IP + route name; a real deployment behind
-a proxy would key off a trusted X-Forwarded-For instead, noted here rather than
-implemented since Nexus has no reverse proxy in front of it yet (added in
-Phase 11's Nginx config).
+INCR+EXPIRE pattern. Two identity strategies are provided:
+
+- `rate_limit`: keyed by client IP + route name. Used for pre-auth or
+  cheap-to-spoof-check endpoints (login, register, refresh). A real
+  deployment behind a proxy would key off a trusted X-Forwarded-For instead,
+  noted here rather than implemented since Nexus has no reverse proxy in
+  front of it yet (added in Phase 11's Nginx config).
+- `rate_limit_for_user`: keyed by authenticated user id + route name. Used
+  for endpoints only reachable once logged in (upload, retry, chat,
+  retrieval-debug) - an IP-keyed limit there would let one abusive org
+  member exhaust the shared budget for every other user behind the same
+  NAT/proxy, and would also let a user dodge the limit by rotating IPs.
+
+Both are best-effort application-level limiting on a single Redis instance -
+not a distributed-systems-grade limiter (no token bucket, no clock skew
+handling across Redis replicas). That's an appropriate tradeoff for this
+project's scale, not a claim of production-grade distributed rate limiting.
 """
 
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from fastapi import Request
+from fastapi import Depends, Request
 from redis.asyncio import Redis
 
 from app.core.config import settings
 from app.core.exceptions import RateLimitedError
+
+
+async def _check_and_increment(key: str, max_requests: int, window_seconds: int) -> None:
+    # Deliberately not a module-level singleton: a cached connection pool is
+    # bound to the event loop that created it, which breaks under
+    # pytest-asyncio's per-test event loops (and would equally break any
+    # other multi-loop deployment). Redis.from_url() is cheap - it does not
+    # eagerly open a socket, only the first command does.
+    redis: Redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, window_seconds)
+    finally:
+        await redis.aclose()
+    if count > max_requests:
+        raise RateLimitedError(
+            "Too many requests. Please try again later.", code="RATE_LIMITED"
+        )
 
 
 def rate_limit(
@@ -22,22 +54,23 @@ def rate_limit(
 ) -> Callable[[Request], Coroutine[Any, Any, None]]:
     async def dependency(request: Request) -> None:
         client_ip = request.client.host if request.client else "unknown"
-        key = f"ratelimit:{key_prefix}:{client_ip}"
-        # Deliberately not a module-level singleton: a cached connection pool
-        # is bound to the event loop that created it, which breaks under
-        # pytest-asyncio's per-test event loops (and would equally break any
-        # other multi-loop deployment). Redis.from_url() is cheap - it does
-        # not eagerly open a socket, only the first command does.
-        redis: Redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        try:
-            count = await redis.incr(key)
-            if count == 1:
-                await redis.expire(key, window_seconds)
-        finally:
-            await redis.aclose()
-        if count > max_requests:
-            raise RateLimitedError(
-                "Too many requests. Please try again later.", code="RATE_LIMITED"
-            )
+        key = f"ratelimit:{key_prefix}:ip:{client_ip}"
+        await _check_and_increment(key, max_requests, window_seconds)
+
+    return dependency
+
+
+def rate_limit_for_user(
+    key_prefix: str, max_requests: int, window_seconds: int = 60
+) -> Callable[..., Coroutine[Any, Any, None]]:
+    # Imported lazily inside the factory, not at module scope, to avoid a
+    # circular import (app.api.v1.deps does not import this module, but
+    # keeping the dependency direction one-way is worth the small ugliness).
+    from app.api.v1.deps import get_current_user
+    from app.models.user import User
+
+    async def dependency(current_user: User = Depends(get_current_user)) -> None:
+        key = f"ratelimit:{key_prefix}:user:{current_user.id}"
+        await _check_and_increment(key, max_requests, window_seconds)
 
     return dependency

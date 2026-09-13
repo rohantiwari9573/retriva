@@ -34,6 +34,7 @@ import hashlib
 import uuid
 
 from fastapi import UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -75,14 +76,30 @@ class DocumentService:
                 code="DUPLICATE_DOCUMENT",
             )
 
-        document = await self.documents.create(
-            org_id=org_id,
-            uploaded_by=uploaded_by,
-            original_filename=_sanitize_display_filename(file.filename or "upload"),
-            mime_type=detected.mime_type,
-            size_bytes=len(data),
-            content_hash=content_hash,
-        )
+        # The get_by_content_hash check above is itself a TOCTOU race: two
+        # concurrent uploads of the same content can both pass it before
+        # either commits. The DB-level uq_document_org_content_hash unique
+        # constraint is the real guard; catch the IntegrityError it raises
+        # and map it to the same 409 rather than let it surface as a 500.
+        # The flush() inside create() poisons the session on failure, so the
+        # session must be rolled back before anything else can be executed.
+        try:
+            document = await self.documents.create(
+                org_id=org_id,
+                uploaded_by=uploaded_by,
+                original_filename=_sanitize_display_filename(file.filename or "upload"),
+                mime_type=detected.mime_type,
+                size_bytes=len(data),
+                content_hash=content_hash,
+            )
+        except IntegrityError as exc:
+            await self.db.rollback()
+            if "uq_document_org_content_hash" in str(exc.orig):
+                raise ConflictError(
+                    "This exact file has already been uploaded to this organization.",
+                    code="DUPLICATE_DOCUMENT",
+                ) from exc
+            raise
 
         storage_key = f"organizations/{org_id}/documents/{document.id}{detected.extension}"
         try:
@@ -102,14 +119,25 @@ class DocumentService:
     async def retry(self, document: Document) -> Document:
         """Re-queue a FAILED document. Only FAILED is a valid source state -
         this is not a general-purpose "restart processing" button; a
-        PROCESSING or READY document already has a worker on it or is done."""
-        if document.status != DocumentStatus.FAILED:
+        PROCESSING or READY document already has a worker on it or is done.
+
+        The FAILED->PROCESSING transition is done as one atomic conditional
+        UPDATE (see DocumentRepository.mark_processing_if_failed), not a
+        read-then-write, so two concurrent retry requests can't both pass the
+        status check and both enqueue a worker for the same document. The
+        transition is committed *before* enqueueing (matching upload()'s
+        ordering) since the worker looks the document up in its own
+        transaction and must see it as durably PROCESSING already.
+        """
+        transitioned = await self.documents.mark_processing_if_failed(
+            document.id, document.organization_id
+        )
+        if not transitioned:
             raise ConflictError(
                 "Only a failed document can be retried.", code="INVALID_STATUS_TRANSITION"
             )
-        document.status = DocumentStatus.PROCESSING
-        document.failure_reason = None
         await self.db.commit()
+        await self.db.refresh(document)
 
         await self._enqueue_processing(document)
         return document

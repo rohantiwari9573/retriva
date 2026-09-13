@@ -45,7 +45,11 @@ async def login(
     return UserPublic.model_validate(user)
 
 
-@router.post("/refresh", response_model=UserPublic)
+@router.post(
+    "/refresh",
+    response_model=UserPublic,
+    dependencies=[Depends(rate_limit("refresh", settings.RATE_LIMIT_REFRESH_PER_MINUTE))],
+)
 async def refresh(
     request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> UserPublic:

@@ -4,12 +4,13 @@ Multi-tenant RAG platform for organizations to upload internal documents and ask
 questions against them, with hybrid retrieval, verified citations, and
 streaming multi-turn conversations.
 
-> **Status:** Phase 6 (conversational RAG: query rewriting, SSE streaming,
-> regenerate) complete. See `docs/rag.md` and `docs/retrieval.md` for the
-> core RAG pipeline, `docs/streaming.md` for conversational RAG/streaming,
-> and `docs/architecture.md` / `docs/system-design.md` for the system-wide
-> view. This README covers local setup and what's implemented so far; it
-> grows into full project documentation in Phase 12.
+> **Status:** Phase 7 (security + reliability hardening) complete. See
+> `docs/rag.md` and `docs/retrieval.md` for the core RAG pipeline,
+> `docs/streaming.md` for conversational RAG/streaming, `docs/security.md`
+> for the security model and threat model, and `docs/architecture.md` /
+> `docs/system-design.md` for the system-wide view. This README covers
+> local setup and what's implemented so far; it grows into full project
+> documentation in Phase 12.
 
 ## Implemented so far
 
@@ -174,8 +175,8 @@ frontend/src/
   that user, not just the one token.
 - **Tenant isolation:** enforced at the service/repository layer via a
   mandatory membership lookup (`app/api/v1/deps.py::get_org_context`) - not
-  Postgres row-level security (documented as a future defense-in-depth option
-  in `docs/security.md` once that's written in Phase 12). A user with no
+  Postgres row-level security, which remains a documented, unimplemented
+  defense-in-depth option (see `docs/security.md`). A user with no
   membership row for an org gets 404, identical to the org not existing.
 - **RBAC:** role hierarchy (`OWNER > ADMIN > MEMBER > VIEWER`) checked via
   `require_role()`, applied per-route, never inferred from client input.
@@ -209,6 +210,21 @@ frontend/src/
 - Query rewriting is judged by wiring/fallback tests and a small manual
   evaluation dataset (`app/evaluation/conversational.py`), not a labeled
   set of real conversational rewrites - see `docs/streaming.md`.
+- Rate limiting is a single-Redis-instance fixed-window limiter, not a
+  distributed/production-grade one; no request-ID correlation exists yet
+  for the HTTP logging path - see `docs/security.md`'s Known limitations
+  for the full, precise list of what Phase 7 does and doesn't claim.
+
+## Security
+
+Phase 7 hardened the system against realistic malicious input, IDOR/BOLA,
+concurrency races, resource exhaustion, and provider failure - see
+[`docs/security.md`](docs/security.md) for the full model: authentication,
+RBAC, multi-tenancy/IDOR protections, file upload and parser hardening,
+rate limiting, prompt-injection posture, reliability/failure-mode behavior,
+and a threat model with mitigation/test/residual-risk per threat. It is
+explicit about what is IMPLEMENTED vs. TESTED vs. NOT VERIFIED - this
+system has not been third-party penetration-tested.
 
 ## Documentation
 
@@ -221,6 +237,8 @@ frontend/src/
 - [`docs/document-ingestion.md`](docs/document-ingestion.md) - the Phase 4
   parsing/chunking/embedding pipeline, Celery task design, retry/idempotency
   behavior, and pgvector schema.
-- API reference, security model, RAG evaluation write-up, interview prep,
-  and resume bullets land in `docs/` starting Phase 12, and are updated
-  incrementally as each phase is implemented.
+- [`docs/security.md`](docs/security.md) - the Phase 7 security model and
+  threat model.
+- API reference, RAG evaluation write-up, interview prep, and resume
+  bullets land in `docs/` starting Phase 12, and are updated incrementally
+  as each phase is implemented.

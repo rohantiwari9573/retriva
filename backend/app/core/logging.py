@@ -1,8 +1,17 @@
 """Structured logging configuration.
 
 Uses structlog so logs are consistently structured (JSON in production, readable
-console output in development). Request-scoped fields (request_id, user_id, org_id)
-are bound via contextvars in middleware, not passed explicitly to every log call.
+console output in development). structlog.contextvars is merged into every log
+line (see merge_contextvars below), and app/workers/celery_app.py's task
+wrapper binds document_id/task_id through it for the Celery worker - but no
+equivalent binding exists yet for the FastAPI HTTP request path (no
+request-id middleware), so request/user/org correlation there still comes
+from each call site's explicit kwargs, not ambient context. A request-id
+middleware was considered for Phase 7 and deliberately deferred: it would
+need to be scoped around a StreamingResponse's generator body correctly (the
+generator runs after the endpoint handler returns, by which point a naive
+middleware's contextvars.reset() would already have fired), which is real
+scope beyond a security/reliability hardening pass - see docs/security.md.
 """
 
 import logging

@@ -204,6 +204,21 @@ async def test_exceeding_max_chunks_raises_permanent_error(
         )
 
 
+async def test_exceeding_max_text_length_raises_permanent_error(
+    db_session, pipeline_session_factory, fake_storage, fake_embedding_provider, monkeypatch
+):
+    monkeypatch.setattr(settings, "MAX_DOCUMENT_TEXT_LENGTH", 10)
+    document = await _make_org_and_document(db_session, fake_storage)
+
+    with pytest.raises(PermanentProcessingError, match="processing limit"):
+        await process_document_pipeline(
+            str(document.id),
+            session_factory=pipeline_session_factory,
+            storage=fake_storage,
+            embedding_provider=fake_embedding_provider,
+        )
+
+
 async def test_markdown_document_preserves_section_metadata(
     db_session, pipeline_session_factory, fake_storage, fake_embedding_provider, monkeypatch
 ):

@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
@@ -21,9 +21,33 @@ configure_logging()
 logger = get_logger(__name__)
 
 
+def _check_production_config() -> None:
+    """Fail loudly at startup if production is misconfigured, rather than let
+    a subtle security gap (cookies sent over plain HTTP, an open CORS
+    allowlist) go unnoticed until it's exploited. Deliberately a plain
+    function called from lifespan, not a Pydantic model_validator on
+    Settings - a field validator runs at import time in every context
+    including the test suite and Alembic, where ENVIRONMENT is never
+    "production" but would still be painful to have explode unexpectedly."""
+    if settings.ENVIRONMENT != "production":
+        return
+    if not settings.COOKIE_SECURE:
+        raise RuntimeError(
+            "COOKIE_SECURE must be true in production - session cookies would "
+            "otherwise be sent over plain HTTP."
+        )
+    if "*" in settings.CORS_ORIGINS:
+        raise RuntimeError(
+            "CORS_ORIGINS must not include '*' in production (combined with "
+            "allow_credentials=True this would allow any site to make "
+            "authenticated requests on a user's behalf)."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("app_startup", environment=settings.ENVIRONMENT)
+    _check_production_config()
     get_s3_storage_provider().ensure_bucket_exists()
     try:
         async with AsyncSessionLocal() as session:
@@ -53,6 +77,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    # Nexus's frontend is a separate origin (never rendered inside this API's
+    # own responses), so these are cheap, low-risk defense-in-depth headers
+    # rather than a bespoke CSP tuned to page content - there is no page
+    # content here, only JSON (and Swagger's /docs in non-production, which
+    # a strict CSP would break).
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if settings.ENVIRONMENT == "production":
+        # Only meaningful (and only safe to assert) once the deployment is
+        # actually served over HTTPS - asserting it in local dev would just
+        # be a no-op at best and a confusing lie at worst.
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
+
 
 register_exception_handlers(app)
 

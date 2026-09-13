@@ -236,6 +236,68 @@ async def test_admin_cannot_grant_owner_role(client):
     assert response.json()["error"]["code"] == "INSUFFICIENT_ROLE"
 
 
+async def test_member_cannot_remove_member(client):
+    """MEMBER is below the ADMIN minimum member-management requires - a
+    plain member must not be able to remove another member, only view."""
+    await _register(client, "owner16@example.com")
+    org = (await client.post("/api/v1/organizations", json={"name": "Org N"})).json()
+    await _register(client, "member16a@example.com")
+    await _register(client, "member16b@example.com")
+    client.cookies.clear()
+    await client.post(
+        "/api/v1/auth/login", json={"email": "owner16@example.com", "password": PASSWORD}
+    )
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members",
+        json={"email": "member16a@example.com", "role": "MEMBER"},
+    )
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members",
+        json={"email": "member16b@example.com", "role": "MEMBER"},
+    )
+    members = (await client.get(f"/api/v1/organizations/{org['id']}/members")).json()
+    target_id = next(m["id"] for m in members if m["email"] == "member16b@example.com")
+
+    client.cookies.clear()
+    await client.post(
+        "/api/v1/auth/login", json={"email": "member16a@example.com", "password": PASSWORD}
+    )
+    response = await client.delete(f"/api/v1/organizations/{org['id']}/members/{target_id}")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+
+
+async def test_member_cannot_change_member_role(client):
+    await _register(client, "owner17@example.com")
+    org = (await client.post("/api/v1/organizations", json={"name": "Org O"})).json()
+    await _register(client, "member17a@example.com")
+    await _register(client, "member17b@example.com")
+    client.cookies.clear()
+    await client.post(
+        "/api/v1/auth/login", json={"email": "owner17@example.com", "password": PASSWORD}
+    )
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members",
+        json={"email": "member17a@example.com", "role": "MEMBER"},
+    )
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members",
+        json={"email": "member17b@example.com", "role": "MEMBER"},
+    )
+    members = (await client.get(f"/api/v1/organizations/{org['id']}/members")).json()
+    target_id = next(m["id"] for m in members if m["email"] == "member17b@example.com")
+
+    client.cookies.clear()
+    await client.post(
+        "/api/v1/auth/login", json={"email": "member17a@example.com", "password": PASSWORD}
+    )
+    response = await client.patch(
+        f"/api/v1/organizations/{org['id']}/members/{target_id}", json={"role": "ADMIN"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+
+
 async def test_remove_member(client):
     await _register(client, "owner15@example.com")
     org = (await client.post("/api/v1/organizations", json={"name": "Org M"})).json()

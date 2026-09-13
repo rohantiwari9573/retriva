@@ -2,6 +2,8 @@
 and file-safety checks against the real API (storage is the in-memory fake -
 see conftest.fake_storage)."""
 
+import pytest
+
 PASSWORD = "correct-horse-99"
 TXT_BYTES = b"Employees are entitled to 24 annual leave days."
 
@@ -89,6 +91,59 @@ async def test_delete_document_removes_row_and_storage_object(client, fake_stora
 
     get_response = await client.get(f"/api/v1/organizations/{org['id']}/documents/{doc['id']}")
     assert get_response.status_code == 404
+
+
+async def test_duplicate_content_race_maps_to_409_not_500(client, monkeypatch):
+    """The get_by_content_hash pre-check in DocumentService.upload() is
+    itself a TOCTOU race - two concurrent uploads of the same content can
+    both pass it before either commits. Simulates the race by forcing the
+    pre-check to always report "no existing document", so the real guard,
+    the uq_document_org_content_hash DB constraint, is what actually catches
+    the second upload - verifying that path is mapped to 409, not left as an
+    unhandled IntegrityError surfacing as a 500."""
+    from app.repositories.document_repository import DocumentRepository
+
+    async def _always_none(self, org_id, content_hash):
+        return None
+
+    monkeypatch.setattr(DocumentRepository, "get_by_content_hash", _always_none)
+
+    org = await _register_and_create_org(client, "owner16@example.com", "Org P")
+    first = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents", files=_upload_files("a16.txt")
+    )
+    assert first.status_code == 201
+
+    second = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents", files=_upload_files("b16.txt")
+    )
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "DUPLICATE_DOCUMENT"
+
+
+async def test_unrelated_integrity_error_is_not_reported_as_duplicate(client, monkeypatch):
+    """A NOT NULL/other constraint violation on the create() flush must not
+    be misreported as DUPLICATE_DOCUMENT just because it's an IntegrityError
+    - only the specific uq_document_org_content_hash constraint should map
+    to that 409; anything else re-raises (surfacing as a generic 500,
+    matching the project's existing "unexpected exception -> 500" contract,
+    not a misleading duplicate-content message)."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.repositories.document_repository import DocumentRepository
+
+    async def _boom(self, **kwargs):
+        raise IntegrityError(
+            "INSERT INTO documents ...", {}, Exception("null value in column x")
+        )
+
+    monkeypatch.setattr(DocumentRepository, "create", _boom)
+    org = await _register_and_create_org(client, "owner16b@example.com", "Org P2")
+
+    response = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents", files=_upload_files()
+    )
+    assert response.status_code == 500
 
 
 async def test_duplicate_content_rejected(client):
@@ -272,3 +327,174 @@ async def test_cross_tenant_cannot_upload(client):
         f"/api/v1/organizations/{org_a['id']}/documents", files=_upload_files()
     )
     assert response.status_code == 404
+
+
+async def _upload_and_fail(client, org_id: str, fake_storage, monkeypatch, filename: str):
+    """Drives a document into FAILED via the real upload flow (storage
+    raises), matching test_storage_failure_marks_document_failed_and_persists
+    - the only way FAILED is legitimately reached without directly poking
+    the DB."""
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("simulated MinIO outage")
+
+    monkeypatch.setattr(fake_storage, "upload", _boom)
+    await client.post(
+        f"/api/v1/organizations/{org_id}/documents", files=_upload_files(filename)
+    )
+    monkeypatch.undo()  # restore real upload for any subsequent calls in the test
+
+    list_response = await client.get(f"/api/v1/organizations/{org_id}/documents")
+    doc = list_response.json()["items"][0]
+    assert doc["status"] == "FAILED"
+    return doc
+
+
+async def test_retry_failed_document_succeeds(client, fake_storage, monkeypatch):
+    org = await _register_and_create_org(client, "owner17@example.com", "Org Q")
+    doc = await _upload_and_fail(client, org["id"], fake_storage, monkeypatch, "retry17.txt")
+
+    response = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents/{doc['id']}/retry"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "PROCESSING"
+    assert body["failure_reason"] is None
+
+
+async def test_retry_non_failed_document_rejected(client):
+    org = await _register_and_create_org(client, "owner18@example.com", "Org R")
+    doc = (
+        await client.post(f"/api/v1/organizations/{org['id']}/documents", files=_upload_files())
+    ).json()
+    assert doc["status"] == "PROCESSING"
+
+    response = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents/{doc['id']}/retry"
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+
+
+async def test_cross_tenant_cannot_retry(client, fake_storage, monkeypatch):
+    org_a = await _register_and_create_org(client, "a-owner3@example.com", "Org Alpha 3")
+    doc = await _upload_and_fail(client, org_a["id"], fake_storage, monkeypatch, "retry-a.txt")
+
+    await _register_and_create_org(client, "b-owner3@example.com", "Org Beta 3")
+    await _login(client, "b-owner3@example.com")
+
+    response = await client.post(
+        f"/api/v1/organizations/{org_a['id']}/documents/{doc['id']}/retry"
+    )
+    assert response.status_code == 404
+
+
+async def test_viewer_cannot_retry(client, fake_storage, monkeypatch):
+    org = await _register_and_create_org(client, "owner19@example.com", "Org S")
+    doc = await _upload_and_fail(client, org["id"], fake_storage, monkeypatch, "retry19.txt")
+    await client.post(
+        "/api/v1/auth/register", json={"email": "viewer19@example.com", "password": PASSWORD}
+    )
+    await _login(client, "owner19@example.com")
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members",
+        json={"email": "viewer19@example.com", "role": "VIEWER"},
+    )
+
+    await _login(client, "viewer19@example.com")
+    response = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents/{doc['id']}/retry"
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+
+
+async def test_concurrent_retry_only_one_transitions(db_session, fake_storage):
+    """Two callers racing DocumentService.retry() on the same FAILED document:
+    only one may win the FAILED->PROCESSING transition. This proves the SQL
+    semantics of the atomic conditional UPDATE (TESTED) - it does not, on a
+    single shared session/connection, prove behavior under two genuinely
+    concurrent database connections (NOT independently verified here)."""
+    import uuid
+
+    from app.models.document import Document
+    from app.models.enums import DocumentStatus
+    from app.models.organization import Organization
+    from app.models.user import User
+    from app.services.document_service import DocumentService
+
+    org = Organization(name="Acme", slug=f"acme-{uuid.uuid4().hex[:8]}")
+    user = User(email=f"{uuid.uuid4().hex}@example.com", hashed_password="x")
+    db_session.add_all([org, user])
+    await db_session.flush()
+    document = Document(
+        organization_id=org.id,
+        uploaded_by=user.id,
+        original_filename="race.txt",
+        storage_key=f"organizations/{org.id}/documents/race.txt",
+        mime_type="text/plain",
+        size_bytes=3,
+        content_hash=uuid.uuid4().hex,
+        status=DocumentStatus.FAILED,
+        failure_reason="boom",
+    )
+    db_session.add(document)
+    await db_session.commit()
+
+    service = DocumentService(db_session, fake_storage)
+
+    first = await service.retry(document)
+    assert first.status == DocumentStatus.PROCESSING
+
+    from app.core.exceptions import ConflictError
+
+    with pytest.raises(ConflictError):
+        await service.retry(document)
+
+
+async def test_upload_rate_limited(client):
+    # The rate-limit dependency's max_requests is bound to settings at route
+    # registration time (Depends(rate_limit_for_user("upload",
+    # settings.RATE_LIMIT_UPLOAD_PER_MINUTE))), so monkeypatching the
+    # setting after app startup has no effect - exhaust the real configured
+    # default instead, same pattern as test_login_rate_limited.
+    from app.core.config import settings
+
+    org = await _register_and_create_org(client, "owner20@example.com", "Org T")
+
+    for i in range(settings.RATE_LIMIT_UPLOAD_PER_MINUTE):
+        response = await client.post(
+            f"/api/v1/organizations/{org['id']}/documents",
+            files=_upload_files(f"u{i}.txt", content=f"content {i}".encode()),
+        )
+        assert response.status_code == 201
+
+    limited = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents", files=_upload_files("uover.txt")
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "RATE_LIMITED"
+
+
+async def test_retry_rate_limited(client, fake_storage, monkeypatch):
+    """The rate-limit dependency counts every request regardless of business
+    outcome (same as login's wrong-password-still-counts pattern) - a single
+    document can only actually transition once, so calls after the first
+    return 409, not 200, but still consume the budget."""
+    from app.core.config import settings
+
+    org = await _register_and_create_org(client, "owner21@example.com", "Org U")
+    doc = await _upload_and_fail(client, org["id"], fake_storage, monkeypatch, "retry21.txt")
+
+    for _ in range(settings.RATE_LIMIT_RETRY_PER_MINUTE):
+        response = await client.post(
+            f"/api/v1/organizations/{org['id']}/documents/{doc['id']}/retry"
+        )
+        assert response.status_code in (200, 409)
+
+    limited = await client.post(
+        f"/api/v1/organizations/{org['id']}/documents/{doc['id']}/retry"
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "RATE_LIMITED"

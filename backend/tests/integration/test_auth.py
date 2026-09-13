@@ -167,3 +167,87 @@ async def test_login_rate_limited(client):
     limited_response = await client.post("/api/v1/auth/login", json=payload)
     assert limited_response.status_code == 429
     assert limited_response.json()["error"]["code"] == "RATE_LIMITED"
+
+
+async def test_refresh_rate_limited(client):
+    from app.core.config import settings
+
+    for _ in range(settings.RATE_LIMIT_REFRESH_PER_MINUTE):
+        response = await client.post("/api/v1/auth/refresh")
+        assert response.status_code == 401  # no cookie set - still counts against the limit
+
+    limited_response = await client.post("/api/v1/auth/refresh")
+    assert limited_response.status_code == 429
+    assert limited_response.json()["error"]["code"] == "RATE_LIMITED"
+
+
+async def test_token_with_malformed_subject_rejected(client):
+    """A validly-signed JWT with a non-UUID (or missing) "sub" claim must not
+    escape as an unhandled 500 - see the get_current_user fix for the
+    uuid.UUID(payload["sub"]) call this exercises."""
+    import jwt
+
+    from app.core.config import settings
+
+    bad_token = jwt.encode(
+        {"sub": "not-a-uuid", "type": "access"},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    client.cookies.set("nexus_access_token", bad_token)
+    response = await client.get("/api/v1/users/me")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "TOKEN_INVALID"
+
+
+async def test_token_with_missing_subject_rejected(client):
+    import jwt
+
+    from app.core.config import settings
+
+    bad_token = jwt.encode(
+        {"type": "access"}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
+    )
+    client.cookies.set("nexus_access_token", bad_token)
+    response = await client.get("/api/v1/users/me")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "TOKEN_INVALID"
+
+
+async def test_login_timing_safe_against_email_enumeration(client, monkeypatch):
+    """verify_password must run even when the user doesn't exist - an `or`
+    short-circuit that skips it would make Argon2's ~100ms cost itself the
+    oracle an attacker uses to enumerate registered emails, despite the
+    identical error text. Asserted by call count/args, not wall-clock timing
+    (timing assertions are flaky and don't actually prove the code path)."""
+    import app.services.auth_service as auth_service_module
+
+    calls: list[tuple[str, str]] = []
+    real_verify_password = auth_service_module.verify_password
+
+    def _spy(password: str, hashed: str) -> bool:
+        calls.append((password, hashed))
+        return real_verify_password(password, hashed)
+
+    monkeypatch.setattr(auth_service_module, "verify_password", _spy)
+
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "no-such-user@example.com", "password": "whatever-1"},
+    )
+    assert len(calls) == 1
+    # Must hash against the fixed dummy hash, never against a None/empty value.
+    assert calls[0][1] == auth_service_module.DUMMY_PASSWORD_HASH
+
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": "real-user-timing@example.com", "password": STRONG_PASSWORD},
+    )
+    client.cookies.clear()
+    calls.clear()
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "real-user-timing@example.com", "password": "wrong-password-1"},
+    )
+    assert len(calls) == 1
+    assert calls[0][1] != auth_service_module.DUMMY_PASSWORD_HASH

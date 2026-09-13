@@ -6,6 +6,7 @@ import io
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from app.core.config import settings
 from app.ingestion.errors import ParsingError
 from app.ingestion.parsers.base import ParsedDocument, ParsedElement
 
@@ -19,6 +20,18 @@ class PDFParser:
 
         if reader.is_encrypted:
             raise ParsingError("PDF is password-protected and cannot be parsed.")
+
+        # The MAX_DOCUMENT_SIZE_MB byte cap only indirectly bounds page
+        # count - a small PDF can still legitimately (or maliciously) contain
+        # tens of thousands of near-empty pages, each cheap on disk but
+        # costing a full extract_text() call. Check before extracting any
+        # text so a pathological page count fails fast.
+        page_count = len(reader.pages)
+        if page_count > settings.MAX_DOCUMENT_PAGES:
+            raise ParsingError(
+                f"PDF has {page_count} pages, exceeding the limit of "
+                f"{settings.MAX_DOCUMENT_PAGES}."
+            )
 
         elements: list[ParsedElement] = []
         for page_number, page in enumerate(reader.pages, start=1):

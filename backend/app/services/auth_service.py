@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import ConflictError, UnauthorizedError
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     create_access_token,
     generate_refresh_token,
     hash_password,
@@ -39,7 +40,13 @@ class AuthService:
         user = await self.users.get_by_email(email)
         # Deliberately identical error for "no such user" and "wrong password" -
         # distinguishing them would let an attacker enumerate registered emails.
-        if user is None or not verify_password(password, user.hashed_password):
+        # verify_password always runs, even when user is None (against a fixed
+        # dummy hash), so response time can't be used as that same oracle -
+        # an `or` short-circuit here would skip Argon2's ~100ms cost precisely
+        # when the email doesn't exist, making the timing itself the leak.
+        hashed = user.hashed_password if user is not None else DUMMY_PASSWORD_HASH
+        password_ok = verify_password(password, hashed)
+        if user is None or not password_ok:
             raise UnauthorizedError("Invalid email or password.", code="INVALID_CREDENTIALS")
         if not user.is_active:
             raise UnauthorizedError("This account has been deactivated.", code="ACCOUNT_INACTIVE")

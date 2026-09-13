@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgContext, get_org_context, require_role
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import rate_limit_for_user
 from app.models.enums import OrgRole
 from app.schemas.document import DocumentDownloadResponse, DocumentListResponse, DocumentPublic
 from app.services.document_service import DocumentService
@@ -18,6 +20,9 @@ router = APIRouter()
     "/{organization_id}/documents",
     response_model=DocumentPublic,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(rate_limit_for_user("upload", settings.RATE_LIMIT_UPLOAD_PER_MINUTE))
+    ],
 )
 async def upload_document(
     file: UploadFile = File(...),
@@ -97,6 +102,9 @@ async def delete_document(
 @router.post(
     "/{organization_id}/documents/{document_id}/retry",
     response_model=DocumentPublic,
+    dependencies=[
+        Depends(rate_limit_for_user("retry", settings.RATE_LIMIT_RETRY_PER_MINUTE))
+    ],
 )
 async def retry_document_processing(
     document_id: uuid.UUID,

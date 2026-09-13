@@ -256,6 +256,28 @@ async def test_retrieval_debug_shows_raw_scores_for_admin(client, db_session):
     assert body["results"][0]["fused_score"] > 0
 
 
+async def test_retrieval_debug_rate_limited(client, db_session):
+    # The rate-limit dependency's max_requests is bound to settings at route
+    # registration time, so monkeypatching the setting after app startup has
+    # no effect - exhaust the real configured default instead.
+    from app.core.config import settings
+
+    org = await _register_and_create_org(client, "owner8b@example.com", "Org H2")
+    await _seed_chunk(db_session, org["id"])
+
+    for _ in range(settings.RATE_LIMIT_RETRIEVAL_DEBUG_PER_MINUTE):
+        response = await client.post(
+            f"/api/v1/organizations/{org['id']}/retrieval/debug", json={"query": CHUNK_CONTENT}
+        )
+        assert response.status_code == 200
+
+    limited = await client.post(
+        f"/api/v1/organizations/{org['id']}/retrieval/debug", json={"query": CHUNK_CONTENT}
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "RATE_LIMITED"
+
+
 async def test_prompt_injection_in_document_content_is_not_reflected_as_system_behavior(
     client, db_session
 ):

@@ -50,6 +50,22 @@ class TestPDFParser:
         with pytest.raises(ParsingError):
             PDFParser().parse(buf.getvalue())
 
+    def test_page_count_over_limit_rejected(self, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "MAX_DOCUMENT_PAGES", 2)
+        data = _make_pdf_bytes(["", "", ""])
+        with pytest.raises(ParsingError):
+            PDFParser().parse(data)
+
+    def test_page_count_at_limit_accepted(self, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "MAX_DOCUMENT_PAGES", 3)
+        data = _make_pdf_bytes(["", "", ""])
+        result = PDFParser().parse(data)
+        assert result.elements == []
+
 
 class TestDOCXParser:
     def test_paragraphs_become_elements(self):
@@ -74,6 +90,22 @@ class TestDOCXParser:
     def test_malformed_docx_raises_parsing_error(self):
         with pytest.raises(ParsingError):
             DOCXParser().parse(b"not a real docx")
+
+    def test_zip_bomb_over_uncompressed_limit_rejected(self, monkeypatch):
+        from app.core.config import settings
+
+        data = _make_docx_bytes([("Hello world.", None)])
+        # The real document's total uncompressed size is trivially small;
+        # setting the limit below it proves the guard actually fires without
+        # needing to construct a real multi-gigabyte zip bomb in a unit test.
+        monkeypatch.setattr(settings, "MAX_DOCX_UNCOMPRESSED_SIZE_BYTES", 10)
+        with pytest.raises(ParsingError):
+            DOCXParser().parse(data)
+
+    def test_normal_docx_under_uncompressed_limit_accepted(self):
+        data = _make_docx_bytes([("Hello world.", None)])
+        result = DOCXParser().parse(data)
+        assert [e.text for e in result.elements] == ["Hello world."]
 
 
 class TestTXTParser:
