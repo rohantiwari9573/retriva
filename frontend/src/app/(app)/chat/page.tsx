@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -13,9 +13,16 @@ import {
 import { MessageInput } from "@/components/chat/message-input";
 import { useChatStream } from "@/hooks/use-chat-stream";
 
+const EXAMPLE_PROMPTS = [
+  "Summarize our most recently uploaded document.",
+  "What are the main security requirements mentioned in our documents?",
+  "Compare the two most recent documents we've uploaded.",
+];
+
 export default function NewChatPage() {
   const router = useRouter();
   const { active, error, send, stop, dismissError } = useChatStream();
+  const [prefill, setPrefill] = useState<{ text: string } | null>(null);
 
   // Redirect to the real conversation URL as soon as message_start resolves
   // its id - the ChatStreamProvider lives above this page in the layout, so
@@ -50,16 +57,34 @@ export default function NewChatPage() {
             )}
           </div>
         ) : (
-          <div className="text-center text-muted-foreground">
-            <MessageSquare className="mx-auto mb-3 h-10 w-10" />
-            <p className="font-medium text-foreground">Ask about your organization&apos;s documents</p>
-            <p className="text-sm">
-              Answers are grounded in retrieved excerpts, with citations you can inspect.
+          <div className="w-full max-w-lg text-center">
+            <MessageSquare className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+            <p className="text-lg font-semibold">Ask your organization&apos;s knowledge</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Get grounded answers from your uploaded documents, with citations you can inspect.
             </p>
+            <div className="mt-6 flex flex-col gap-2">
+              {EXAMPLE_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setPrefill({ text: prompt })}
+                  className="rounded-lg border px-4 py-2.5 text-left text-sm text-foreground transition-colors hover:border-primary hover:bg-primary/5"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
-      <MessageInput onSend={handleSend} onStop={stop} disabled={!!active} isStreaming={!!active} />
+      <MessageInput
+        onSend={handleSend}
+        onStop={stop}
+        disabled={!!active}
+        isStreaming={!!active}
+        prefill={prefill}
+      />
     </>
   );
 }

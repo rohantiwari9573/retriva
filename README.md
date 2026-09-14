@@ -4,14 +4,14 @@ Multi-tenant RAG platform for organizations to upload internal documents and ask
 questions against them, with hybrid retrieval, verified citations, and
 streaming multi-turn conversations.
 
-> **Status:** Phase 8 (production observability + distributed diagnostics)
-> complete. See `docs/rag.md` and `docs/retrieval.md` for the core RAG
-> pipeline, `docs/streaming.md` for conversational RAG/streaming,
-> `docs/security.md` for the security model and threat model,
-> `docs/observability.md` for structured logging/metrics/tracing, and
-> `docs/architecture.md` / `docs/system-design.md` for the system-wide
-> view. This README covers local setup and what's implemented so far; it
-> grows into full project documentation in Phase 12.
+> **Status:** Phase 9 (frontend / product polish) complete. See
+> `docs/rag.md` and `docs/retrieval.md` for the core RAG pipeline,
+> `docs/streaming.md` for conversational RAG/streaming, `docs/security.md`
+> for the security model and threat model, `docs/observability.md` for
+> structured logging/metrics/tracing, `docs/frontend.md` for the UI
+> architecture, and `docs/architecture.md` / `docs/system-design.md` for
+> the system-wide view. This README covers local setup and what's
+> implemented so far; it grows into full project documentation in Phase 12.
 
 ## Implemented so far
 
@@ -57,10 +57,15 @@ streaming multi-turn conversations.
   during generation. See `docs/streaming.md`.
 - **Frontend:** `/login`, `/register`, `/dashboard`, `/documents`, `/chat`,
   `/settings/profile`, `/settings/organization`, `/settings/members` - all
-  wired to the real backend, no mocked data. `/documents` polls while any
-  document is `PROCESSING` and shows a retry action on `FAILED`. `/chat`
-  streams answers live, shows citations inline as clickable source chips
-  with a detail panel, and supports stop/regenerate/copy on responses.
+  wired to the real backend, no mocked data. A responsive app shell (desktop
+  sidebar, mobile drawer nav) with RBAC-aware controls throughout. The
+  dashboard surfaces real document/conversation counts and recent activity -
+  never fabricated numbers. `/documents` supports drag-and-drop upload,
+  polls while any document is `PROCESSING`, shows a mobile card layout
+  below the table breakpoint, and exposes retry on `FAILED`. `/chat` streams
+  answers live, shows citations inline as clickable source chips with a
+  detail panel, supports stop/regenerate/copy/delete-conversation, and
+  handles a missing/deleted conversation gracefully. See `docs/frontend.md`.
 - **Observability:** structured JSON logging with request-ID/trace-ID
   correlation, Prometheus metrics (`/metrics`) across HTTP/RAG/LLM/
   streaming/ingestion/Celery/security events, and OpenTelemetry distributed
@@ -265,6 +270,9 @@ system has not been third-party penetration-tested.
 - [`docs/observability.md`](docs/observability.md) - the Phase 8 logging/
   metrics/tracing architecture, metric catalogue, cardinality and sensitive-
   data policies, and a worked trace-debugging example.
+- [`docs/frontend.md`](docs/frontend.md) - the Phase 9 UI architecture,
+  responsive/accessibility approach, and an honest account of what was and
+  wasn't verified (no browser automation was available in that session).
 - API reference, RAG evaluation write-up, interview prep, and resume
   bullets land in `docs/` starting Phase 12, and are updated incrementally
   as each phase is implemented.

@@ -27,7 +27,7 @@ export function OrgSwitcher() {
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button variant="outline" className="w-56 justify-between">
+            <Button variant="outline" className="w-36 justify-between sm:w-56">
               <span className="truncate">{organization.name}</span>
               <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
             </Button>

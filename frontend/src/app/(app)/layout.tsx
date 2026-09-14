@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+import { MobileNav } from "@/components/layout/mobile-nav";
 import { NavSidebar } from "@/components/layout/nav-sidebar";
 import { OrgSwitcher } from "@/components/layout/org-switcher";
 import { UserMenu } from "@/components/layout/user-menu";
@@ -34,16 +35,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <CurrentOrganizationProvider>
       <div className="flex min-h-screen flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
-          <div className="flex items-center gap-4">
-            <span className="font-semibold">Nexus</span>
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+            <MobileNav />
+            <span className="hidden shrink-0 font-semibold sm:inline">Nexus</span>
             <OrgSwitcher />
           </div>
           <UserMenu />
         </header>
-        <div className="flex flex-1">
+        <div className="flex flex-1 overflow-hidden">
           <NavSidebar />
-          <main className="flex-1 p-6">{children}</main>
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
         </div>
       </div>
     </CurrentOrganizationProvider>
