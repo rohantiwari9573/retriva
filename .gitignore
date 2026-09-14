@@ -25,6 +25,10 @@ next-env.d.ts
 postgres_data/
 minio_data/
 
+# Phase 10 evaluation run output - reproducible from the checked-in
+# dataset/fixtures, never committed (see docs/evaluation.md)
+backend/app/evaluation/results/
+
 # OS
 .DS_Store
 Thumbs.db

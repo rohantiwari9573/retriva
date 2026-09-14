@@ -4,14 +4,18 @@ Multi-tenant RAG platform for organizations to upload internal documents and ask
 questions against them, with hybrid retrieval, verified citations, and
 streaming multi-turn conversations.
 
-> **Status:** Phase 9 (frontend / product polish) complete. See
+> **Status:** Phase 10 (RAG evaluation & testing) complete. See
 > `docs/rag.md` and `docs/retrieval.md` for the core RAG pipeline,
 > `docs/streaming.md` for conversational RAG/streaming, `docs/security.md`
 > for the security model and threat model, `docs/observability.md` for
 > structured logging/metrics/tracing, `docs/frontend.md` for the UI
-> architecture, and `docs/architecture.md` / `docs/system-design.md` for
-> the system-wide view. This README covers local setup and what's
-> implemented so far; it grows into full project documentation in Phase 12.
+> architecture, `docs/evaluation.md` for the retrieval/generation/citation
+> evaluation harness (`docs/evaluation-baseline.md` for the current
+> baseline status - honestly, no live numbers were captured yet, since LM
+> Studio wasn't running when this phase was built), and
+> `docs/architecture.md` / `docs/system-design.md` for the system-wide
+> view. This README covers local setup and what's implemented so far; it
+> grows into full project documentation in Phase 12.
 
 ## Implemented so far
 
@@ -70,8 +74,17 @@ streaming multi-turn conversations.
   correlation, Prometheus metrics (`/metrics`) across HTTP/RAG/LLM/
   streaming/ingestion/Celery/security events, and OpenTelemetry distributed
   tracing exported to Jaeger - all opt-in via a Compose profile, all
-  fail-open (Nexus runs identically with the whole stack turned off). See
+  fail-open (Retriva runs identically with the whole stack turned off). See
   `docs/observability.md`.
+- **RAG evaluation:** `python -m app.evaluation` - a versioned, 35-case
+  dataset across 10 question categories, run against a real, checked-in
+  fixture corpus (real ingestion pipeline, real Postgres/pgvector/full-text
+  search) to compare vector-only, keyword-only, and hybrid RRF retrieval on
+  Recall@K/MRR/nDCG, plus LLM-as-judge generation scoring, citation
+  validity/correctness, query-rewrite effectiveness, and prompt-injection
+  behavior when a local LLM is reachable. No numeric baseline has been
+  captured yet - see `docs/evaluation.md` and `docs/evaluation-baseline.md`
+  for exactly what is and isn't claimed.
 
 ## Stack
 
@@ -273,6 +286,12 @@ system has not been third-party penetration-tested.
 - [`docs/frontend.md`](docs/frontend.md) - the Phase 9 UI architecture,
   responsive/accessibility approach, and an honest account of what was and
   wasn't verified (no browser automation was available in that session).
-- API reference, RAG evaluation write-up, interview prep, and resume
-  bullets land in `docs/` starting Phase 12, and are updated incrementally
-  as each phase is implemented.
+- [`docs/evaluation.md`](docs/evaluation.md) - the Phase 10 RAG evaluation
+  harness: dataset format, retrieval baselines/metrics, generation/citation/
+  injection evaluation methodology, and known limitations.
+- [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md) - the current
+  baseline snapshot status (honestly: no live numeric baseline yet, since
+  LM Studio wasn't running when this phase was built).
+- API reference, interview prep, and resume bullets land in `docs/`
+  starting Phase 12, and are updated incrementally as each phase is
+  implemented.
