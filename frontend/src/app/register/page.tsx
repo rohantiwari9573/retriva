@@ -57,7 +57,9 @@ export default function RegisterPage() {
   const errorMessage = getRegisterErrorMessage(register.error);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+    <main className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+      {/* See login/page.tsx's comment - same pattern, same reason. */}
+      <h1 className="sr-only">Create your Retriva account</h1>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-xl">Create your account</CardTitle>
@@ -136,7 +138,7 @@ export default function RegisterPage() {
           </p>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }
 

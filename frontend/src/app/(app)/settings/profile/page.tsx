@@ -67,8 +67,10 @@ export default function ProfileSettingsPage() {
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <div className="grid gap-2">
-                <label className="text-sm font-medium">Email</label>
-                <Input value={user.email} disabled readOnly />
+                <label htmlFor="profile-email" className="text-sm font-medium">
+                  Email
+                </label>
+                <Input id="profile-email" value={user.email} disabled readOnly />
               </div>
               <FormField
                 control={form.control}

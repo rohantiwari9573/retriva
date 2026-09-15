@@ -57,7 +57,14 @@ function LoginForm() {
   const errorMessage = getLoginErrorMessage(login.error);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+    <main className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+      {/* CardTitle is a plain styled <div> (see components/ui/card.tsx) -
+          used all over the app for non-page-title purposes (dialogs, stat
+          cards), so it isn't changed globally. This sr-only <h1> gives the
+          page a real landmark-appropriate heading without altering the
+          existing visual design - found missing via axe's
+          page-has-heading-one / landmark-one-main rules. */}
+      <h1 className="sr-only">Sign in to Retriva</h1>
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-xl">Sign in to Retriva</CardTitle>
@@ -112,7 +119,7 @@ function LoginForm() {
           </p>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }
 

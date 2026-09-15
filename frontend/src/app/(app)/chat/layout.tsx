@@ -23,6 +23,12 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     // so an in-flight stream survives the /chat -> /chat/{id} redirect that
     // happens once a new conversation's id is known (see use-chat-stream.tsx).
     <ChatStreamProvider organizationId={organization.id}>
+      {/* Covers both /chat and /chat/[conversationId] with one heading,
+          rather than duplicating a visible one per page (neither route's
+          own content has a natural page title - a conversation view is
+          just messages) - found missing via axe's page-has-heading-one
+          rule during the post-completion hardening pass. */}
+      <h1 className="sr-only">Chat</h1>
       <div className="flex h-[calc(100vh-8rem)] min-h-[420px] overflow-hidden rounded-lg border md:h-[75vh]">
         <ConversationSidebar organizationId={organization.id} />
         <div className="flex flex-1 flex-col overflow-hidden">

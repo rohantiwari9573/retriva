@@ -47,7 +47,7 @@ export default function DashboardPage() {
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-24 text-center">
         <Building2 className="h-10 w-10 text-muted-foreground" />
         <div>
-          <h2 className="text-lg font-semibold">Create your first organization</h2>
+          <h1 className="text-lg font-semibold">Create your first organization</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Organizations hold your team&apos;s documents, conversations, and members.
           </p>

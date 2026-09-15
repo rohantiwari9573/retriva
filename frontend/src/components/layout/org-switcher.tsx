@@ -34,8 +34,10 @@ export function OrgSwitcher() {
           }
         />
         <DropdownMenuContent align="start" className="w-56">
+          {/* onClick, not onSelect - see user-menu.tsx's comment; same
+              silent-no-op bug, found the same way. */}
           {organizations.map((org) => (
-            <DropdownMenuItem key={org.id} onSelect={() => setOrganizationId(org.id)}>
+            <DropdownMenuItem key={org.id} onClick={() => setOrganizationId(org.id)}>
               <span className="truncate">{org.name}</span>
               {org.id === organization.id && (
                 <span className="ml-auto text-xs text-muted-foreground">Current</span>
@@ -43,7 +45,7 @@ export function OrgSwitcher() {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setCreateOpen(true)}>
+          <DropdownMenuItem onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />
             New organization
           </DropdownMenuItem>

@@ -100,7 +100,11 @@ export default function MembersSettingsPage() {
               <TableRow>
                 <TableHead>Member</TableHead>
                 <TableHead>Role</TableHead>
-                {canManage && <TableHead className="w-12" />}
+                {canManage && (
+                  <TableHead className="w-12">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -185,7 +189,7 @@ function MemberRow({
       <TableCell>
         {canManage ? (
           <Select value={member.role} onValueChange={(value) => handleRoleChange(value as OrgRole)}>
-            <SelectTrigger className="w-32">
+            <SelectTrigger className="w-32" aria-label={`Role for ${member.email}`}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -205,15 +209,17 @@ function MemberRow({
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" aria-label={`Actions for ${member.email}`}>
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               }
             />
             <DropdownMenuContent align="end">
+              {/* onClick, not onSelect - see components/layout/user-menu.tsx's
+                  comment; same silent-no-op bug, found the same way. */}
               <DropdownMenuItem
                 variant="destructive"
-                onSelect={() => setConfirmRemoveOpen(true)}
+                onClick={() => setConfirmRemoveOpen(true)}
               >
                 {isSelf ? "Leave organization" : "Remove member"}
               </DropdownMenuItem>

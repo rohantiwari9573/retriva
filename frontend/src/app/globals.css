@@ -60,7 +60,15 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* Was 0.556 originally. A first nudge to 0.5 cleared 4.5:1 against the
+     nav sidebar's background but still measured only 3.86:1 against a
+     dialog's slightly lighter card surface (#fbfbfb) - different
+     backgrounds across the app need different margin, so this went one
+     step further/darker to clear AA against the lightest surface found,
+     not just the first one tested. Found via the post-completion
+     hardening pass's accessibility test suite (real measured values, not
+     guessed). */
+  --muted-foreground: oklch(0.44 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);

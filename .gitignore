@@ -21,6 +21,11 @@ node_modules/
 out/
 next-env.d.ts
 
+# Playwright - screenshots/traces from local E2E/accessibility runs,
+# reproducible by re-running `npx playwright test` (see frontend/e2e/)
+frontend/test-results/
+frontend/playwright-report/
+
 # Docker volumes / local data
 postgres_data/
 minio_data/

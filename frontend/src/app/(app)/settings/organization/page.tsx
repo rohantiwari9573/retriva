@@ -86,8 +86,10 @@ export default function OrganizationSettingsPage() {
                 )}
               />
               <div className="grid gap-2">
-                <label className="text-sm font-medium">Slug</label>
-                <Input value={organization.slug} disabled readOnly />
+                <label htmlFor="org-slug" className="text-sm font-medium">
+                  Slug
+                </label>
+                <Input id="org-slug" value={organization.slug} disabled readOnly />
               </div>
               {canEdit && (
                 <Button type="submit" disabled={updateOrganization.isPending}>
