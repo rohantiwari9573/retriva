@@ -4,10 +4,14 @@ A dedicated package (slowapi, etc.) wasn't worth the dependency for a single
 INCR+EXPIRE pattern. Two identity strategies are provided:
 
 - `rate_limit`: keyed by client IP + route name. Used for pre-auth or
-  cheap-to-spoof-check endpoints (login, register, refresh). A real
-  deployment behind a proxy would key off a trusted X-Forwarded-For instead,
-  noted here rather than implemented since Nexus has no reverse proxy in
-  front of it yet (added in Phase 11's Nginx config).
+  cheap-to-spoof-check endpoints (login, register, refresh). Still keys off
+  `request.client.host` directly rather than a trusted X-Forwarded-For -
+  this was fine with no reverse proxy in front of the app, but the Phase 11
+  AWS deployment now puts nginx in front of it, so in that environment
+  every request's `request.client.host` is nginx's own connection, not the
+  real visitor - rate limiting there is effectively per-deployment, not
+  per-client, until this is fixed to trust X-Forwarded-For from nginx. A
+  real known gap, not yet addressed (see docs/aws-deployment.md).
 - `rate_limit_for_user`: keyed by authenticated user id + route name. Used
   for endpoints only reachable once logged in (upload, retry, chat,
   retrieval-debug) - an IP-keyed limit there would let one abusive org

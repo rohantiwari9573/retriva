@@ -1,6 +1,6 @@
 """Centralized Prometheus metric definitions.
 
-Every metric Nexus exposes is declared here, once - instrumentation call
+Every metric Retriva exposes is declared here, once - instrumentation call
 sites (middleware, RAGService, the ingestion pipeline, the Celery task
 wrapper, etc.) import the metric objects from this module and call
 `.labels(...).inc()`/`.observe()` at the one or two natural choke points for

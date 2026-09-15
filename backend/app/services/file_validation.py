@@ -1,6 +1,6 @@
 """File type validation via magic-byte sniffing.
 
-Hand-rolled rather than via python-magic/libmagic: the four formats Nexus
+Hand-rolled rather than via python-magic/libmagic: the four formats Retriva
 accepts have simple, well-documented signatures, and avoiding the dependency
 sidesteps python-magic-bin being unmaintained and unreliable to install on
 newer Python/Windows combinations. Never trust the client-supplied filename

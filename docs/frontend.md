@@ -1,6 +1,6 @@
 # Frontend (Phase 9)
 
-The Next.js 16 App Router frontend for Nexus, polished in Phase 9 into a
+The Next.js 16 App Router frontend for Retriva, polished in Phase 9 into a
 coherent SaaS shell around the RAG backend built in Phases 1-8. This
 document covers what exists, what Phase 9 specifically changed, and -
 important given how much of this document is otherwise design description

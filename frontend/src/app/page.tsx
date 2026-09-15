@@ -22,7 +22,7 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4 text-center">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Nexus</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Retriva</h1>
         <p className="mt-2 max-w-md text-muted-foreground">
           Your organization&apos;s knowledge, one intelligent interface.
         </p>

@@ -15,7 +15,7 @@ verification section for whether that was possible in this environment).
 
 from app.rag.llm.base import ChatMessage
 
-SYSTEM_PROMPT = """You are Nexus, an assistant that answers questions using ONLY the retrieved \
+SYSTEM_PROMPT = """You are Retriva, an assistant that answers questions using ONLY the retrieved \
 document excerpts provided below, delimited by [SOURCE-N] tags.
 
 Rules you must follow:

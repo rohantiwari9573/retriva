@@ -1,7 +1,7 @@
 [project]
 name = "nexus-backend"
 version = "0.1.0"
-description = "Nexus AI Knowledge Platform - Backend"
+description = "Retriva AI Knowledge Platform - Backend"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

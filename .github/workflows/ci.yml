@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   backend:
@@ -94,3 +94,58 @@ jobs:
 
       - name: Build frontend image
         run: docker build -t nexus-frontend:ci ./frontend
+
+  # Phase 11: deploy only after backend/frontend/docker-build all pass, and
+  # only on an actual push to master (never on a PR) - see
+  # docs/aws-deployment.md "Rollback procedure" for what to do if a bad
+  # deploy makes it through anyway. Auth is a plain SSH key stored as a
+  # GitHub secret, not OIDC+IAM - the AWS account's IAM user this project
+  # shares with two other projects had no permission to create IAM roles,
+  # and broadening that on a shared credential was judged riskier than an
+  # SSH key scoped to only this one EC2 instance. See docs/aws-deployment.md
+  # "GitHub Actions authentication" for the full reasoning.
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, docker-build]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.RETRIVA_DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.RETRIVA_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync source to EC2
+        # rsync from the runner's own checkout, not a git pull on the box -
+        # the box deliberately has no credentials for this private repo (see
+        # docs/aws-deployment.md "GitHub Actions authentication"), so the
+        # runner (which already has the checked-out code) pushes it over
+        # instead of the box pulling it.
+        run: |
+          # --delete removes files on the box that no longer exist in this
+          # checkout - but .env and frontend/.env.local are real secrets
+          # that live ONLY on the box (gitignored, never in this checkout),
+          # so they are explicitly excluded from deletion as well as from
+          # being overwritten by a (nonexistent) source copy.
+          rsync -az --delete \
+            --exclude='.git' --exclude='node_modules' --exclude='.next' \
+            --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.ruff_cache' --exclude='.mypy_cache' \
+            --exclude='.env' --exclude='frontend/.env.local' \
+            --filter='P .env' --filter='P frontend/.env.local' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./ ec2-user@${{ secrets.RETRIVA_HOST }}:/home/ec2-user/retriva/
+
+      - name: Build, migrate, deploy on EC2
+        run: |
+          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.RETRIVA_HOST }} '
+            set -e
+            cd /home/ec2-user/retriva
+            docker compose -f docker-compose.prod.yml build backend worker frontend
+            docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+            docker compose -f docker-compose.prod.yml up -d
+            sleep 5
+            curl -f http://localhost/health
+          '

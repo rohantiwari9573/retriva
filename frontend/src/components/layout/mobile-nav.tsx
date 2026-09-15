@@ -32,7 +32,7 @@ export function MobileNav() {
       </Button>
       <SheetContent side="left" className="w-64">
         <SheetHeader>
-          <SheetTitle>Nexus</SheetTitle>
+          <SheetTitle>Retriva</SheetTitle>
         </SheetHeader>
         <nav aria-label="Main navigation" className="flex flex-col gap-1 p-3">
           <NavLinks onNavigate={() => setOpen(false)} />

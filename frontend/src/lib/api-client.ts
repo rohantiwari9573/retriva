@@ -1,5 +1,5 @@
 /**
- * Thin fetch wrapper for the Nexus API. Centralized so auth headers, base URL, and
+ * Thin fetch wrapper for the Retriva API. Centralized so auth headers, base URL, and
  * error envelope parsing live in one place instead of being repeated per call site.
  */
 

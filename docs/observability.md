@@ -1,7 +1,7 @@
 # Observability (Phase 8)
 
 Structured logging, request/trace correlation, Prometheus metrics, and
-OpenTelemetry distributed tracing for Nexus - all free/local, all optional
+OpenTelemetry distributed tracing for Retriva - all free/local, all optional
 (the core platform runs identically with every piece of this turned off).
 See `docs/security.md` for the security/threat model this builds on top of
 without changing; this document only covers what Phase 8 adds.
@@ -107,7 +107,7 @@ These are two different things and this codebase never conflates them:
 A request has exactly one `request_id` for its whole lifetime. It can touch
 several `trace_id`s in principle (a trace ends at process/context
 boundaries OTel doesn't automatically bridge - see "Celery tracing"
-below for the one place this actually happens in Nexus).
+below for the one place this actually happens in Retriva).
 
 ## OpenTelemetry (tracing)
 
@@ -509,7 +509,7 @@ unused third flag that would need to stay in sync with the two real ones.
 ## Failure isolation (Step 33)
 
 Turning Prometheus, Grafana, or Jaeger off (or never starting the
-`observability` profile at all) does not affect Nexus:
+`observability` profile at all) does not affect Retriva:
 
 - `/metrics` still responds if `PROMETHEUS_ENABLED=true` (just unscraped -
   Counters/Histograms are in-process memory, not a network client, so there
@@ -530,7 +530,7 @@ Jaeger never running at all - see Verification below.
 `OTEL_TRACES_SAMPLER=parentbased_traceidratio` + `OTEL_TRACES_SAMPLER_ARG=1.0`
 by default: sample everything, unless a parent span already made a
 different decision (relevant once/if a future phase adds a service that
-calls into Nexus with its own sampling decision already made). 1.0 = 100%
+calls into Retriva with its own sampling decision already made). 1.0 = 100%
 sampling - the right default for local development, where full visibility
 matters more than reducing trace volume. A real production deployment
 would lower `OTEL_TRACES_SAMPLER_ARG` (e.g. to `0.1`) to reduce exporter

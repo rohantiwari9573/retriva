@@ -60,7 +60,7 @@ function LoginForm() {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">Sign in to Nexus</CardTitle>
+          <CardTitle className="text-xl">Sign in to Retriva</CardTitle>
           <CardDescription>
             Access your organization&apos;s knowledge base.
           </CardDescription>

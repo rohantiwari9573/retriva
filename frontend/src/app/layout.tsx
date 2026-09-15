@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexus — AI Knowledge Platform",
+  title: "Retriva — AI Knowledge Platform",
   description: "Securely search, understand, and interact with your organization's documents using AI-powered retrieval.",
 };
 

@@ -21,7 +21,7 @@ never raises into request-handling code. `init_tracing()` itself is wrapped
 so that if the SDK/exporter can't even be constructed (bad endpoint URL,
 missing dependency), OTEL_ENABLED is treated as false for the rest of the
 process rather than crashing startup - telemetry must never gate whether
-Nexus itself can serve a request.
+Retriva itself can serve a request.
 """
 
 from __future__ import annotations

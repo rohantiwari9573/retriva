@@ -217,7 +217,7 @@ Grepped for every outbound-request call site in `app/`
 `app/rag/embedding/dependency.py`, `app/storage/s3.py`. All of them call a
 server-configured base URL (`LLM_BASE_URL`, `EMBEDDING_BASE_URL`,
 `S3_ENDPOINT_URL`) read from environment settings - none accept a
-user-controlled URL. **Nexus has no user-controlled outbound-URL feature
+user-controlled URL. **Retriva has no user-controlled outbound-URL feature
 at all** (no webhooks, no "fetch this URL" functionality, no link preview) -
 this is a documented finding, not a gap requiring new code, per the Phase 7
 spec's explicit instruction not to invent a feature just to secure it.

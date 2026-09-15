@@ -275,7 +275,7 @@ function AddMemberDialog({
           <DialogHeader>
             <DialogTitle>Add member</DialogTitle>
             <DialogDescription>
-              They must already have a Nexus account under this email.
+              They must already have a Retriva account under this email.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

@@ -6,7 +6,7 @@ later phases land, per the README's Phase 12 documentation plan.
 
 ## System overview
 
-Nexus is a modular monolith, not a microservices system: one FastAPI
+Retriva is a modular monolith, not a microservices system: one FastAPI
 process serves the HTTP API, one Celery worker process handles background
 work, and both share the same Python codebase and the same Postgres
 database. This is a deliberate choice for a project at this scale - it

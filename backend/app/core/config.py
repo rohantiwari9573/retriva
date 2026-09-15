@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # --- App ---
     ENVIRONMENT: Literal["development", "testing", "production"] = "development"
     DEBUG: bool = True
-    APP_NAME: str = "Nexus"
+    APP_NAME: str = "Retriva"
     API_V1_PREFIX: str = "/api/v1"
 
     # --- Security ---

@@ -38,7 +38,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <MobileNav />
-            <span className="hidden shrink-0 font-semibold sm:inline">Nexus</span>
+            <span className="hidden shrink-0 font-semibold sm:inline">Retriva</span>
             <OrgSwitcher />
           </div>
           <UserMenu />

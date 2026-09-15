@@ -179,7 +179,7 @@ async def request_observability_middleware(request: Request, call_next):
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
-    # Nexus's frontend is a separate origin (never rendered inside this API's
+    # Retriva's frontend is a separate origin (never rendered inside this API's
     # own responses), so these are cheap, low-risk defense-in-depth headers
     # rather than a bespoke CSP tuned to page content - there is no page
     # content here, only JSON (and Swagger's /docs in non-production, which
