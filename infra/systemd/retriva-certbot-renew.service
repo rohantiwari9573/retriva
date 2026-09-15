@@ -1,0 +1,18 @@
+[Unit]
+Description=Retriva - renew Let's Encrypt certificate if due
+# Uses the webroot authenticator (see infra/nginx/nginx.conf's
+# /.well-known/acme-challenge/ location and docker-compose.prod.yml's
+# certbot_webroot mount) rather than standalone - webroot lets nginx keep
+# serving port 80 throughout, including during a real renewal, so this
+# never needs to stop nginx and causes zero downtime on any day, renewal
+# or not. See docs/aws-deployment.md "HTTPS status" for the full design
+# and why this replaced the standalone method the certificate was
+# originally issued with.
+Documentation=docs/aws-deployment.md
+
+[Service]
+Type=oneshot
+# --quiet: only errors are logged, not certbot's routine "no renewal due"
+# chatter, keeping journalctl readable. --deploy-hook only fires on an
+# actual renewal (see infra/certbot/renew-deploy-hook.sh).
+ExecStart=/usr/bin/certbot renew --quiet --deploy-hook /opt/retriva/renew-deploy-hook.sh

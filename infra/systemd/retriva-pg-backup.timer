@@ -1,0 +1,11 @@
+[Unit]
+Description=Retriva - daily encrypted PostgreSQL backup
+Documentation=docs/aws-deployment.md
+
+[Timer]
+OnCalendar=03:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

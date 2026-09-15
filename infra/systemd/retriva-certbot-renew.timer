@@ -1,0 +1,16 @@
+[Unit]
+Description=Retriva - daily Let's Encrypt renewal check
+Documentation=docs/aws-deployment.md
+
+[Timer]
+# Certbot's own guidance: check twice daily; a genuine renewal only
+# actually happens within the last 30 days of the cert's 90-day validity,
+# so daily-or-twice-daily are both "idle no-op" on ~29 of every 30 days -
+# this runs once daily, with jitter, to avoid every renewal check across
+# unrelated systems landing in the same second.
+OnCalendar=daily
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

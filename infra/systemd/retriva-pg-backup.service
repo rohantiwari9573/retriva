@@ -1,0 +1,9 @@
+[Unit]
+Description=Retriva - encrypted PostgreSQL backup
+Documentation=docs/aws-deployment.md
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/retriva/pg-backup.sh

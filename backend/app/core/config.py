@@ -145,6 +145,16 @@ class Settings(BaseSettings):
     # authenticated user, since they're only reachable once logged in and an
     # IP-keyed limit would let one abusive org member exhaust the budget for
     # every other user behind the same NAT/proxy. See app/core/rate_limit.py.
+    #
+    # TRUSTED_PROXY_IPS: direct TCP peer addresses allowed to supply the real
+    # client IP via X-Real-IP (never X-Forwarded-For - see rate_limit.py's
+    # module docstring for why). Empty by default, which preserves exact
+    # existing behavior (key off request.client.host directly) for local dev
+    # and CI, where nothing sits in front of the app. Only the AWS
+    # deployment's nginx container - given a fixed IP in
+    # docker-compose.prod.yml specifically so this list can name it - should
+    # ever be listed here.
+    TRUSTED_PROXY_IPS: list[str] = []
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
     RATE_LIMIT_REGISTER_PER_MINUTE: int = 3
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 20

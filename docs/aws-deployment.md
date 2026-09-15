@@ -149,16 +149,26 @@ during Phase 11 deployment - SSH and HTTPS both became fully
 unreachable, while AWS's own instance/system status checks kept
 reporting "ok" (consistent with in-guest memory exhaustion, not an
 AWS-level fault). Both times required an `ec2:RebootInstances` call to
-recover (the IAM policy didn't originally include this permission - it
-was added mid-deployment for exactly this reason). The working fix:
-**stop the other containers (`postgres`, `redis`, `minio`, `backend`,
-`worker`) before building the frontend**, then `up -d` everything again
-afterward - this frees enough RAM (~1.4 GiB free vs. ~1.1 GiB with
-everything running) for the build to complete without OOMing. The
-GitHub Actions deploy workflow does **not** currently do this
-stop-before-build step (see "Known limitations" - a future deploy that
-rebuilds the frontend while the stack is live could reproduce the same
-OOM).
+recover. It recurred a third time (spontaneously, with zero build
+activity) during the post-completion hardening pass, which is what
+finally prompted fixing the root cause rather than working around it.
+
+**FIXED, VERIFIED LIVE**: the frontend is no longer built on this
+instance at all. `.github/workflows/ci.yml`'s `deploy` job now builds
+the frontend image on the GitHub Actions runner (far more RAM than this
+2 GiB instance), saves it with `docker save | gzip`, and ships the
+tarball over the same SSH channel everything else uses - no ECR, no new
+IAM surface. The instance just `docker load`s it and starts the
+container; `docker-compose.prod.yml`'s frontend service carries an
+explicit `image: retriva-frontend:latest` tag for this, with `build:`
+kept only as a manual fallback, not part of the normal deploy path.
+Verified live: a real deploy of this exact path (image built on a
+non-EC2 machine, shipped, loaded, started) showed **zero memory
+increase** on the instance (`free -h` before/after identical, no build
+process ever ran there), and the resulting frontend served correctly
+(`200` on `/` and `/health` through nginx). Backend/worker still build
+directly on the instance - they're plain Python with no webpack step
+and were never the source of the OOM.
 
 ## Database configuration
 
@@ -174,10 +184,50 @@ in local dev/CI is used here, so pgvector support is identical - this
 was not a separate compatibility question the way it would be for
 choosing an RDS engine version.
 
-**Tradeoff documented**: a self-hosted database has no automated
-backups, no managed failover, and ties data durability to this one
-instance's EBS volume. Acceptable for a portfolio deployment; not a
-production recommendation as-is (see "Future Improvements").
+**Tradeoff documented**: a self-hosted database has no managed failover
+and ties data durability to this one instance's EBS volume. Acceptable
+for a portfolio deployment; not a production recommendation as-is (see
+"Future Improvements"). Automated backups (below) mitigate the "no
+recovery at all" risk, not the single-instance/no-failover one.
+
+### PostgreSQL backups - FIXED, TESTED, VERIFIED LIVE
+
+No RDS means no automated snapshots, so a local, encrypted backup
+strategy was implemented instead of leaving this as an open gap. S3 was
+considered and rejected for now - the IAM credentials have no `s3:*`
+permission, and adding it purely to store a handful of small SQL dumps
+wasn't judged worth the new permission surface for a single-instance
+deployment; local storage on the same EBS volume is a real limitation
+(a lost instance loses backups too), documented as such below.
+
+- `infra/backup/pg-backup.sh`: runs `pg_dump` inside the `postgres`
+  container (never publishes the DB port to do this), pipes the output
+  through `gzip` then `openssl enc -aes-256-cbc -pbkdf2` using a random
+  256-bit key generated once on the instance (`/opt/retriva/backup.key`,
+  mode `600`, root-owned, never committed to git - same treatment as the
+  TLS private key). Writes to `/opt/retriva/backups/`, prunes anything
+  older than 7 days.
+- `infra/systemd/retriva-pg-backup.{service,timer}`: runs the backup
+  daily at 03:00 UTC (jittered).
+- `infra/backup/pg-restore.sh`: decrypts and restores a given backup
+  file. **Defaults to a scratch database** (`retriva_restore_test`), not
+  the live one - restoring into a throwaway target is the whole point of
+  being able to prove a backup works without ever risking the data it's
+  meant to protect. Restoring over the real live database requires the
+  explicit, deliberately loud `--target=REPLACE-LIVE-DATABASE` flag,
+  which nothing in this repo invokes automatically.
+- **Backup + restore proof, not just "the command exists"**: a real
+  backup was taken from the live database, then actually restored into
+  a scratch database and verified - all 9 expected tables present, and
+  row counts for `users`/`organizations`/`documents` matched the live
+  database exactly (1/1/1 at the time of the test). The scratch database
+  was dropped immediately after verification.
+- **Known limitations**: backups live on the same EBS volume as the
+  database they're backing up - they protect against accidental data
+  loss/corruption (a bad migration, a mistaken `DELETE`), not against
+  losing the instance itself. A geographically separate copy (S3, or
+  even just `scp`-ing backups elsewhere periodically) would close that
+  gap but was deliberately not added given the IAM/cost tradeoff above.
 
 ## Object storage configuration
 
@@ -346,6 +396,23 @@ password auth (key-only, AL2023 default) and is mitigated by aggressive
 `fail2ban`-style hardening not being needed at this traffic level -
 called out explicitly as a residual risk, not silently accepted.
 
+**FIXED, VERIFIED LIVE - rate limiting now identifies the real client,
+not nginx.** `docker-compose.prod.yml` defines a fixed-subnet network
+(`172.28.0.0/16`) with nginx pinned to `172.28.0.10`; the backend's
+`TRUSTED_PROXY_IPS` setting names that exact address, and
+`app/core/rate_limit.py` only trusts the `X-Real-IP` header (never
+`X-Forwarded-For`, which a client can partially spoof by prepending
+their own value before nginx's `proxy_add_x_forwarded_for` appends the
+real one) when the direct TCP peer is that pinned address. Verified
+live: triggering the login rate limit through the real HTTPS endpoint
+produced a Redis key of `ratelimit:login:ip:<real public IP>`, not
+`ratelimit:login:ip:172.28.0.10` - confirming per-client limiting is
+actually in effect, not per-deployment as it was before this fix. 6 new
+unit tests in `backend/tests/unit/test_rate_limit.py` cover the trust
+boundary directly, including the spoofing-prevention case (an untrusted
+direct connection supplying its own `X-Real-IP` must not have it
+honored).
+
 ## HTTPS status
 
 **Real HTTPS is live**, via a genuine Let's Encrypt certificate for
@@ -360,11 +427,28 @@ and `COOKIE_SECURE=false`. Rather than weakening that check (explicitly
 prohibited) or shipping a non-functional HTTP-only deployment, `sslip.io`
 + Let's Encrypt was set up as a zero-cost, genuine fix.
 
-- Certificate expires **2026-12-13**. **Auto-renewal is not yet
-  configured** - `certbot renew` needs to be run manually (or a cron/
-  systemd timer added) before then, or the site will start failing TLS
-  handshakes. Tracked under Future Improvements.
-- HTTP (port 80) redirects to HTTPS (301), verified live.
+- **FIXED, TESTED, VERIFIED LIVE - automated renewal is now configured.**
+  The certificate was switched from the `standalone` authenticator (used
+  for the original one-off issuance, which would have needed nginx
+  stopped during every real renewal) to `webroot`:
+  `infra/nginx/nginx.conf`'s port-80 server block serves
+  `/.well-known/acme-challenge/` from `/var/www/certbot` (mounted
+  read-only into the nginx container) before the HTTPS redirect applies,
+  so nginx never has to stop, even on a real renewal - genuinely
+  zero-downtime. `infra/systemd/retriva-certbot-renew.{service,timer}`
+  run `certbot renew --deploy-hook infra/certbot/renew-deploy-hook.sh`
+  daily (`OnCalendar=daily`, jittered) - certbot itself only actually
+  renews within 30 days of expiry, so this is an idle no-op most days;
+  the deploy-hook (which reloads nginx via `nginx -s reload`, a graceful
+  reload with no dropped connections) only runs on the days a renewal
+  genuinely happens, confirmed by testing `certbot renew --dry-run` live
+  on the instance: `Congratulations, all simulated renewals succeeded`.
+  The certificate itself was reissued via webroot during this setup
+  (`--force-renewal`, one-time) and now expires **2026-12-14** - each
+  future renewal extends it another ~90 days automatically. Verified via
+  `systemctl list-timers`: the timer is enabled and active.
+- HTTP (port 80) redirects to HTTPS (301) for everything except the ACME
+  challenge path, verified live.
 - HSTS (`Strict-Transport-Security`) header confirmed present on
   responses.
 
@@ -560,39 +644,64 @@ itself (which would drift from source control).
 
 ## Known limitations
 
-1. Frontend rebuilds risk OOMing the instance unless the other
-   containers are stopped first (see "Compute configuration") - the CI
-   deploy job does not yet do this.
-2. Let's Encrypt certificate auto-renewal is not configured (manual
-   `certbot renew` needed before 2026-12-13).
-3. No AWS Budget/billing alarm exists.
-4. No automated database backups.
-5. SSH is open to `0.0.0.0/0` (key-only auth, but not IP-restricted).
-6. No image registry - rollback is source-based, not
-   pinned-artifact-based.
-7. The frontend UI itself still displays "Nexus" branding in a few
+**Resolved during the post-completion hardening pass** (kept here,
+struck through in spirit but not deleted, per the project's own
+documentation discipline of not erasing history - see items above for
+the fixes): frontend-build OOM risk, TLS auto-renewal, rate limiting
+misidentifying the client behind nginx, and no database backups are
+**no longer open items** - see "Compute configuration", "HTTPS status",
+"Networking / security groups", and "PostgreSQL backups" above.
+
+Still open:
+
+1. No AWS Budget/billing alarm exists - the IAM user has no `budgets:*`
+   permission; the minimal policy needed is documented and was
+   presented for approval rather than granted unilaterally.
+2. SSH is open to `0.0.0.0/0` (key-only auth, but not IP-restricted) -
+   unchanged; GitHub Actions' runner IP is dynamic and not usefully
+   allowlistable.
+3. No image registry for backend/worker - the frontend now ships as a
+   pre-built tarball (see "Compute configuration"), but backend/worker
+   still build from source on the instance; rollback for those two
+   remains source-based, not pinned-artifact-based.
+4. The frontend UI itself still displays "Nexus" branding in a few
    places (title, headings) - out of scope for this phase (which
    deliberately does not touch frontend content), noted here as a real,
    observed gap for whenever that's addressed.
-8. Single point of failure - one instance, no load balancing, no
+5. Single point of failure - one instance, no load balancing, no
    multi-AZ anything. Appropriate for a portfolio deployment, explicitly
-   not production-grade as-is.
+   not production-grade as-is (see the HA proposal in
+   `docs/interview.md` / the hardening report for what scaling this
+   would actually look like - not implemented).
+6. Backups live on the same EBS volume as the database (see "PostgreSQL
+   backups") - protects against data-level mistakes, not instance loss.
+7. **Newly observed**: `tests/integration/test_retrieval.py::test_hybrid_retrieve_hydrates_metadata_correctly`
+   failed once during a full local suite run, then passed both in
+   isolation and on a subsequent full-suite re-run - consistent with a
+   rare, order- or timing-dependent flake rather than a real regression
+   (nothing in this hardening pass touched retrieval/hybrid/fusion
+   code). Not chased further, since it wasn't reliably reproducible;
+   documented honestly rather than ignored or falsely claimed fixed.
 
 ## Future Improvements
 
-(Recorded per the Phase 11 boundary - **not implemented**, listed only.)
+(**Not implemented**, listed only. Items completed during the
+post-completion hardening pass - certbot auto-renewal, the CI
+build-on-runner fix, automated Postgres backups, and the rate-limit
+trusted-proxy fix - have been removed from this list; see the sections
+above for what was actually done and verified.)
 
-- Wire certbot auto-renewal into a systemd timer or cron job.
-- Add the stop-before-build RAM workaround to the CI `deploy` job, or
-  move to a two-stage deploy (build on a separate/larger machine or via
-  GitHub Actions' own runner, push only the built artifact to the
-  instance) to remove the OOM risk entirely.
 - Set up an AWS Budget with an email alert once `budgets:*` permission
-  is available.
+  is granted (minimal policy documented, presented for approval, not
+  yet granted).
 - Reconsider OIDC + a scoped IAM deploy role if this deployment becomes
-  long-lived, rather than the current SSH-key approach.
-- Automated Postgres backups (e.g. a scheduled `pg_dump` to the same
-  MinIO bucket, or eventually a small managed offering).
+  long-lived, rather than the current SSH-key approach (minimal policy
+  to be documented similarly if pursued).
+- Off-instance backup copy (S3 or otherwise) so instance loss doesn't
+  also mean backup loss - deliberately not done yet given the IAM/cost
+  tradeoff (see "PostgreSQL backups").
 - Introduce minimal Terraform if the AWS footprint grows beyond what's
   comfortable to track by hand.
 - Rebrand remaining "Nexus" strings in the frontend UI to "Retriva".
+- Registry/pinned-artifact rollback for backend/worker, matching what
+  the frontend now has via the prebuilt-tarball deploy path.

@@ -138,14 +138,35 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
             ./ ec2-user@${{ secrets.RETRIVA_HOST }}:/home/ec2-user/retriva/
 
+      - name: Build frontend image on the runner (not on EC2)
+        # This runner has far more RAM than the 2 GiB EC2 instance, and
+        # `next build`'s webpack step is the one thing in this whole stack
+        # memory-hungry enough to have OOM'd that instance twice (see
+        # docs/aws-deployment.md "Compute configuration") - building here
+        # instead of on the box removes the risk entirely rather than
+        # working around it with a stop-other-containers-first script on
+        # every deploy. No ECR involved: the built image is saved to a
+        # plain tarball and shipped over the same SSH channel everything
+        # else already uses, avoiding a registry's cost/IAM surface for a
+        # single-instance deployment.
+        run: |
+          docker build -t retriva-frontend:latest \
+            --build-arg NEXT_PUBLIC_API_URL="${{ vars.RETRIVA_PUBLIC_URL }}" \
+            ./frontend
+          docker save retriva-frontend:latest | gzip > /tmp/retriva-frontend.tar.gz
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            /tmp/retriva-frontend.tar.gz ec2-user@${{ secrets.RETRIVA_HOST }}:/tmp/retriva-frontend.tar.gz
+
       - name: Build, migrate, deploy on EC2
         run: |
           ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.RETRIVA_HOST }} '
             set -e
+            docker load < /tmp/retriva-frontend.tar.gz
+            rm -f /tmp/retriva-frontend.tar.gz
             cd /home/ec2-user/retriva
-            docker compose -f docker-compose.prod.yml build backend worker frontend
+            docker compose -f docker-compose.prod.yml build backend worker
             docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
             docker compose -f docker-compose.prod.yml up -d
             sleep 5
-            curl -f http://localhost/health
+            curl -fsSk https://localhost/health
           '

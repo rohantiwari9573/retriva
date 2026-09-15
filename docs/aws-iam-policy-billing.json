@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BudgetsManageOwn",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ViewBudget",
+        "budgets:ModifyBudget"
+      ],
+      "Resource": "arn:aws:budgets::238086621238:budget/*"
+    }
+  ]
+}

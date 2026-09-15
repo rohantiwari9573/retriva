@@ -15,6 +15,49 @@ does this), TESTED (an automated test exercises it against real Postgres/
 Redis/MinIO, not a mock), or NOT VERIFIED (believed true, not exercised by
 an automated test or a live provider).
 
+## Live security regression review (post-completion hardening pass)
+
+A focused, manual regression pass against the **local** Docker stack
+(explicitly not the public AWS deployment, to avoid any risk to it) -
+not a penetration test, a targeted check of the specific attack classes
+below using real HTTP requests against the running application, with
+two real test users/organizations created and cleaned up afterward.
+
+| Attack class | Result |
+|---|---|
+| Cross-tenant IDOR (list/get/download/delete a document, view org details/members belonging to another org) | **404 on all 6**, never 403 - existence never leaked, confirmed the target resource was unaffected by the attempted cross-tenant delete |
+| Malformed JWT: no cookie | 401 |
+| Malformed JWT: garbage string | 401 |
+| Malformed JWT: `alg: none` (classic JWT bypass) | 401 - PyJWT correctly refuses to accept an algorithm other than the configured `HS256` |
+| Malformed JWT: valid structure, wrong signing secret | 401, clean `TOKEN_INVALID` JSON error, no stack trace |
+| Upload validation: `.pdf` extension, non-PDF bytes | Rejected with `UNSUPPORTED_FILE_TYPE` - confirms byte-level sniffing, not extension trust |
+| Path traversal via filename | Not exercised via a live crafted request (tooling limitation in this session - see caveat below); verified instead by code review: the storage key is `organizations/{org_id}/documents/{document_id}{ext}`, built entirely from server-generated IDs - the client filename never enters a storage path at all, making traversal structurally impossible rather than merely filtered |
+| Presigned URL: swap the object key to a different ID | 403 |
+| Presigned URL: strip the signature query params | 403 |
+| Presigned URL: corrupt one character of the signature | 403 |
+| CORS: preflight from an untrusted origin | No `Access-Control-Allow-Origin` in the response - a real browser blocks the follow-up request at the preflight stage; confirmed on both the preflight and the actual request |
+| CORS: preflight from the configured trusted origin | Correct `Access-Control-Allow-Origin` present |
+| Malformed JSON request body | Clean `VALIDATION_ERROR`, no stack trace |
+| Oversized field value (100,000-char org name) | Clean `VALIDATION_ERROR` citing the 255-char limit, no crash |
+| Malformed UUID path parameter | Clean `VALIDATION_ERROR`, no crash |
+| SQL-injection-style organization name (`Robert'; DROP TABLE organizations;--`) | Stored as a literal string via SQLAlchemy's parameterized queries; table confirmed intact and queryable afterward - no injection occurred |
+| `openapi.json` / `/docs` content | No secrets, credentials, or internal paths found in the schema |
+| Security headers on a real API response | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` all present |
+
+**Caveat**: the path-traversal-via-filename test could not be cleanly
+executed with a crafted `;filename=` multipart override in this
+session's shell environment (a tooling limitation, not an application
+one) - substituted with direct code review of the storage-key
+construction, which is a stronger guarantee than a single passing test
+case would have been anyway (structural impossibility vs. "this one
+payload was blocked"). Prompt injection was not exercised live in this
+pass (LM Studio unavailable - see the evaluation baseline docs); the
+prompt-construction-level guarantee remains verified only by
+`backend/tests/unit/test_prompts.py`'s existing unit tests, unchanged
+by this review.
+
+**No vulnerability was found requiring a fix during this pass.**
+
 ## Authentication
 
 - Passwords hashed with Argon2id (`argon2-cffi`'s `PasswordHasher`, which

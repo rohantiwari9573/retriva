@@ -15,6 +15,18 @@
 # See docs/aws-deployment.md for the full deployment sequence, cost notes,
 # and cleanup procedure.
 
+networks:
+  # A fixed subnet exists for exactly one reason: pinning nginx to a known
+  # IP (172.28.0.10 below) so the backend can trust its X-Real-IP header
+  # for rate limiting (TRUSTED_PROXY_IPS) without trusting arbitrary
+  # traffic - see app/core/rate_limit.py's module docstring. Every other
+  # service gets a Docker-assigned address within this same subnet; only
+  # nginx's needs to be predictable.
+  retriva_net:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -27,6 +39,8 @@ services:
     # No host port published - reachable only from other containers on this
     # compose network. Never exposed to the public internet (Phase 11 spec's
     # explicit networking requirement).
+    networks:
+      - retriva_net
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -39,6 +53,8 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     # No host port published - internal only, same reasoning as postgres.
+    networks:
+      - retriva_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -57,6 +73,8 @@ services:
     # nginx /storage/ proxy over HTTPS instead (see infra/nginx/nginx.conf),
     # not by exposing MinIO's port directly. 9001 (web console/admin UI) is
     # never exposed at all, by host or by proxy.
+    networks:
+      - retriva_net
     volumes:
       - minio_data:/data
     healthcheck:
@@ -71,6 +89,8 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
+    networks:
+      - retriva_net
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +112,8 @@ services:
     restart: unless-stopped
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1
     env_file: .env
+    networks:
+      - retriva_net
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,24 +127,37 @@ services:
       retries: 3
 
   frontend:
+    # Explicit image tag (not just Compose's default <project>-frontend
+    # inference) so `docker load`-ing a tarball built on the GitHub Actions
+    # runner - see the `deploy` job in .github/workflows/ci.yml - lands on
+    # exactly the tag `docker compose up` will look for, with no build
+    # needed on this instance at all. The frontend's `next build` is the
+    # one step in this whole stack memory-hungry enough to have OOM'd this
+    # 2 GiB instance twice (see docs/aws-deployment.md "Compute
+    # configuration") - moving it to the runner, which has far more RAM,
+    # removes that risk entirely rather than working around it in place.
+    # `build:` is kept so a manual on-box build still works if ever needed
+    # (e.g. `docker compose -f docker-compose.prod.yml build frontend`),
+    # it's simply not what the normal deploy path calls anymore.
+    image: retriva-frontend:latest
     build:
       context: ./frontend
-      # Compose reads ${NEXT_PUBLIC_API_URL} from this project's own .env
-      # file for variable substitution here - this is a BUILD arg (baked
-      # into the client bundle by `npm run build`), a separate mechanism
-      # from the `env_file: .env` below (which only affects the running
-      # container, too late for a NEXT_PUBLIC_* value). See
-      # frontend/Dockerfile and docs/aws-deployment.md "Frontend" for why
-      # both are needed.
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     restart: unless-stopped
     env_file: .env
+    networks:
+      - retriva_net
     # No host port published - only reachable through the nginx proxy below.
 
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    networks:
+      retriva_net:
+        # Pinned so the backend can name this exact address in
+        # TRUSTED_PROXY_IPS - see the `networks:` block comment above.
+        ipv4_address: 172.28.0.10
     ports:
       - "80:80"
       - "443:443"
@@ -131,9 +166,12 @@ services:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       # Let's Encrypt cert, managed on the host by certbot (not by this
       # compose file) - see docs/aws-deployment.md "HTTPS status" for the
-      # renewal procedure (certs expire after 90 days; auto-renewal is not
-      # yet wired up, tracked under Future Improvements).
+      # automated renewal design (infra/systemd/retriva-certbot-renew.{service,timer}).
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      # ACME HTTP-01 challenge webroot, shared read-only with the host
+      # process running certbot - not writable from inside the container,
+      # since nginx only ever needs to serve files certbot already wrote.
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - backend
       - frontend

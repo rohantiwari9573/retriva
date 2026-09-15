@@ -4,14 +4,20 @@ A dedicated package (slowapi, etc.) wasn't worth the dependency for a single
 INCR+EXPIRE pattern. Two identity strategies are provided:
 
 - `rate_limit`: keyed by client IP + route name. Used for pre-auth or
-  cheap-to-spoof-check endpoints (login, register, refresh). Still keys off
-  `request.client.host` directly rather than a trusted X-Forwarded-For -
-  this was fine with no reverse proxy in front of the app, but the Phase 11
-  AWS deployment now puts nginx in front of it, so in that environment
-  every request's `request.client.host` is nginx's own connection, not the
-  real visitor - rate limiting there is effectively per-deployment, not
-  per-client, until this is fixed to trust X-Forwarded-For from nginx. A
-  real known gap, not yet addressed (see docs/aws-deployment.md).
+  cheap-to-spoof-check endpoints (login, register, refresh). Resolves the
+  identity via `_resolve_client_ip()` below - `request.client.host`
+  directly unless that peer is a configured trusted proxy
+  (`settings.TRUSTED_PROXY_IPS`), in which case the proxy's own
+  `X-Real-IP` header is used instead. This is deliberately X-Real-IP, not
+  X-Forwarded-For: nginx's `proxy_set_header X-Real-IP $remote_addr;`
+  *overwrites* any client-supplied value, so it can't be spoofed, whereas
+  `proxy_add_x_forwarded_for` *appends* to whatever X-Forwarded-For value
+  the client already sent - a client could set
+  `X-Forwarded-For: 1.2.3.4` themselves and have nginx append its own
+  address after it, and naively trusting "the first entry" would then
+  trust the attacker-supplied value. With no trusted proxy configured
+  (the default - local dev, CI), behavior is identical to before this was
+  added.
 - `rate_limit_for_user`: keyed by authenticated user id + route name. Used
   for endpoints only reachable once logged in (upload, retry, chat,
   retrieval-debug) - an IP-keyed limit there would let one abusive org
@@ -71,11 +77,29 @@ async def _check_and_increment(
     rate_limit_allowed_total.labels(endpoint=key_prefix).inc()
 
 
+def _resolve_client_ip(request: Request) -> str:
+    """The identity a per-IP rate limit keys on.
+
+    Trusts X-Real-IP only when the direct TCP peer is in
+    settings.TRUSTED_PROXY_IPS - an untrusted or absent peer always falls
+    back to request.client.host, exactly the pre-existing behavior. This
+    ordering matters: checking the trusted-peer condition first means an
+    attacker connecting directly (not through the real proxy) can supply
+    any X-Real-IP they like and it's simply never consulted.
+    """
+    direct_peer = request.client.host if request.client else None
+    if direct_peer is not None and direct_peer in settings.TRUSTED_PROXY_IPS:
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip
+    return direct_peer or "unknown"
+
+
 def rate_limit(
     key_prefix: str, max_requests: int, window_seconds: int = 60
 ) -> Callable[[Request], Coroutine[Any, Any, None]]:
     async def dependency(request: Request) -> None:
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = _resolve_client_ip(request)
         key = f"ratelimit:{key_prefix}:ip:{client_ip}"
         await _check_and_increment(key_prefix, key, max_requests, window_seconds)
 
