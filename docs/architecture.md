@@ -162,3 +162,65 @@ current design scales indefinitely:
   the same single-LM-Studio-instance ceiling above - a stream just makes
   the wait latency-hidden (tokens render incrementally) rather than
   removing the underlying one-generation-at-a-time constraint.
+
+## High-availability architecture proposal (design only - not implemented)
+
+Written as part of the post-completion hardening cycle's Performance +
+Stability workstream, at the user's explicit request for **a design
+proposal only** - no AWS resources were provisioned or changed to
+produce this. The live deployment remains exactly what
+`docs/aws-deployment.md` describes: one `t3.small` EC2 instance running
+the full Docker Compose stack, no load balancer, no managed data
+services. That is a deliberate, cost-conscious choice for a
+single-instance portfolio deployment, not an oversight - the table
+below is "what would change and why if this needed to survive real
+production traffic and single-node failure," not a recommendation to
+build it now.
+
+| Component today | Single point of failure it creates | What a production HA version would need | Why | Rough added cost |
+|---|---|---|---|---|
+| One EC2 instance runs backend, worker, frontend, nginx, Postgres, Redis, MinIO in Docker Compose | The entire stack goes down together - an OS-level crash, an OOM (already observed live, see "Compute configuration"), or a bad `docker compose up` takes out the app, the database, and the queue in one event | Split app instances from stateful services; run >=2 app instances (backend+frontend) behind a load balancer, in >=2 Availability Zones | An instance failure currently means full downtime with no automatic failover; splitting compute from state is the prerequisite for everything else in this table | ALB: ~$18-25/mo + a second `t3.small`: ~$18-22/mo |
+| nginx on the same instance is the only reverse proxy/TLS terminator | nginx dying takes down all routing, including health checks | An AWS Application Load Balancer (or a managed nginx/Traefik pair) terminating TLS, health-checking each app instance, and routing only to healthy ones | Removes nginx-on-a-single-box as a SPOF; ACM-issued certificates also remove this project's current Let's-Encrypt-on-webroot renewal machinery as an operational dependency | Included in ALB cost above; ACM certs are free |
+| Postgres + pgvector runs as a container on the same instance, backed by that instance's EBS volume | Instance loss risks data loss beyond the last backup (`docs/aws-deployment.md`'s backup workstream mitigates this partially, but recovery is manual and has RPO/RTO measured in the backup interval, not seconds) | Amazon RDS for PostgreSQL (with the pgvector extension, supported on RDS Postgres 15+) in Multi-AZ mode | Automated failover, continuous backup/point-in-time-recovery, and no more manual `pg_dump`/restore runbook | RDS `db.t3.small` Multi-AZ: roughly **$50-70/mo** - the single largest line item in this table |
+| Redis (Celery broker + result backend, rate-limit counters) runs as a container on the same instance | Losing it drops in-flight Celery task state and momentarily breaks rate limiting (fails open/closed depending on the code path - worth re-checking if this is ever built) | Amazon ElastiCache for Redis, single replica minimum | Removes Redis from the same blast radius as the app; Celery broker loss currently means retried/lost in-flight jobs with no durability guarantee beyond Redis's own container | ElastiCache `cache.t3.micro` + replica: roughly **$25-35/mo** |
+| MinIO runs as a container on the same instance, backed by that instance's EBS volume | Instance loss risks document/original-file loss; no cross-AZ redundancy | Amazon S3 (this project's `StorageProvider` abstraction already supports an S3 backend option architecturally, not just MinIO - see `docs/architecture.md`'s "Provider abstraction" section) | S3 gives 11-nines durability and multi-AZ redundancy by default, at a smaller operational footprint than self-managing MinIO's own replication | S3 standard storage: pennies at this project's data volume; no fixed monthly floor |
+| One Celery worker process, no autoscaling | Ingestion throughput has a hard ceiling (see Concurrency/soak results in `docs/performance.md`); a worker crash pauses all ingestion until the container restarts | >=2 worker instances/tasks, ideally autoscaled on queue depth (Celery + CloudWatch custom metric, or a managed queue-depth-based scaling policy) | Removes ingestion as a single-worker bottleneck and SPOF; directly addresses the "one Celery worker" limitation already named above | A second worker instance: ~$18-22/mo, or shared with the second app instance |
+| No container registry; the frontend image is built on GitHub Actions and shipped over SSH (`docker save \| gzip`) | Works today at this project's deploy frequency, but doesn't scale to >2 app instances needing the same image, and has no image version history beyond the running container | Amazon ECR (or another registry) as the source of truth each app instance pulls from on deploy | Multi-instance deploys need a shared pull target, not point-to-point SSH shipping; also enables faster rollback (pull a previous tag) than the current SSH-replace flow | ECR: a few dollars/mo at this project's image size/retention |
+| Observability (structlog, Prometheus, OpenTelemetry/Jaeger - see `docs/observability.md`) runs per-instance, not centralized | Multiple app instances would produce fragmented logs/metrics/traces with no single place to see cross-instance behavior; today's single instance sidesteps this by construction | Centralize metrics (Amazon Managed Prometheus or CloudWatch), logs (CloudWatch Logs or an aggregator), and traces (AWS X-Ray or a managed Jaeger/Tempo) so behavior across instances is visible in one place | Required as soon as there is more than one app instance producing telemetry - not needed before that point | CloudWatch Logs/Metrics: usage-based, roughly **$5-15/mo** at low volume; Managed Prometheus adds more |
+| No autoscaling; instance count is fixed at one | Traffic spikes degrade latency (see concurrency results in `docs/performance.md`) rather than triggering more capacity | An Auto Scaling Group for the app tier, scaling on CPU or request-latency CloudWatch alarms | Lets capacity track load instead of being fixed; only meaningful once there are >=2 instances behind a load balancer already | Cost scales with actual usage, not a fixed floor - hard to estimate without real traffic data |
+| Backups exist (`docs/aws-deployment.md`'s backup workstream) but recovery is a manual, single-instance runbook | No tested disaster-recovery plan for "the whole AWS account/region becomes unavailable," only "this instance's disk is corrupted" | A documented, periodically-*tested* DR runbook, plus (if ever justified by real availability requirements) cross-region backup replication | The gap between "backups exist" and "disaster recovery is proven to work" is real and worth naming, even though nothing here suggests today's traffic level justifies closing it yet | Cross-region S3 replication: pennies at this volume; the real cost is testing time, not AWS spend |
+
+**Suggested migration sequence, if this were ever pursued** (each step
+independently valuable, not an all-or-nothing rewrite):
+
+1. Move Postgres to RDS first - it's the component with the worst
+   failure mode today (stateful, single-instance, backup-dependent
+   recovery) and migrating it doesn't require touching the app tier's
+   topology.
+2. Move MinIO to S3 - the `StorageProvider` abstraction already exists
+   for this; it's a config change plus a one-time data migration, not a
+   code rewrite.
+3. Move Redis to ElastiCache - lower risk than Postgres/S3 since Celery
+   task state and rate-limit counters are not durable business data.
+4. Only then introduce a second app instance + load balancer - doing
+   this before steps 1-3 would mean load-balancing across instances
+   that still share a single point of failure for all their state,
+   which defeats the purpose.
+5. Add autoscaling and centralized observability last, once real
+   multi-instance traffic patterns exist to scale and observe.
+
+**Rough total added run-rate if fully built**: roughly **$115-170/mo**
+on top of the current ~$20-24/mo single-instance cost - i.e., this is a
+genuine 5-8x cost increase, which is exactly why it is a proposal and
+not a recommendation: nothing about this project's actual traffic
+(a portfolio demo, not a paying multi-tenant customer base) currently
+justifies that spend. It is written so the tradeoffs are on record and
+concrete, not to argue for building it.
+
+**Explicitly not proposed here** (per this workstream's own
+constraints, and because nothing in the evidence gathered justifies
+them): Kubernetes, a service mesh, Kafka or any other message broker
+beyond Redis/Celery, database sharding or read replicas beyond RDS
+Multi-AZ's built-in failover, and a microservices split of the current
+modular monolith. All of these solve problems this project does not
+currently have.

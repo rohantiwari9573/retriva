@@ -413,6 +413,38 @@ boundary directly, including the spoofing-prevention case (an untrusted
 direct connection supplying its own `X-Real-IP` must not have it
 honored).
 
+**FIXED, VERIFIED LIVE - nginx no longer caches a stale backend IP
+across container restarts.** Found during the Performance + Stability
+workstream's lightweight AWS smoke check, not proactively: `/health`
+and `/readiness` returned `502 Bad Gateway` while `/` still returned
+`200`. `docker logs retriva-nginx-1` showed `connect() failed (111:
+Connection refused) while connecting to upstream, ... upstream:
+"http://172.28.0.5:8000/health"` - the `backend` container had
+independently restarted roughly 10 minutes earlier with a new
+Docker-assigned internal IP, but nginx (continuously running for ~3
+hours, no reload since) still held the old one, because the previous
+config used a static `upstream { server backend:8000; }` block that
+Docker's embedded DNS resolves exactly once, at nginx startup/reload.
+Immediately restored service with `docker exec retriva-nginx-1 nginx -s
+reload` (confirmed `/health` -> 200, `/readiness` -> ready). Root cause
+fixed durably in `infra/nginx/nginx.conf`: added `resolver 127.0.0.11
+valid=10s;` (Docker's embedded DNS server) and converted every
+`proxy_pass` target from a static `upstream` name to a `set
+$xxx_upstream host:port; proxy_pass http://$xxx_upstream;` variable,
+which forces nginx to actually consult the resolver on a 10s TTL
+instead of caching indefinitely. Validated with `nginx -t` both locally
+(via `docker run nginx:1.27-alpine`) and on the EC2 host before
+reloading, then deployed with `docker compose -f docker-compose.prod.yml
+up -d --force-recreate nginx` and re-verified `/health`, `/readiness`,
+and `/` all `200`. A second, artificially-forced container recreation
+was attempted to reproduce a clean before/after IP change, but Docker's
+IP allocator happened to reassign the exact same freed IP both times -
+per this project's standing rule against manufacturing incidents just
+to have a result, this was not pursued further; the fix rests on the
+real incident's own nginx error log plus the well-established
+correctness of the resolver+variable technique, not a second staged
+reproduction.
+
 ## HTTPS status
 
 **Real HTTPS is live**, via a genuine Let's Encrypt certificate for

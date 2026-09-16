@@ -240,7 +240,12 @@ async def ensure_eval_corpus(
         )
         document_names.append(path.name)
 
-    return EvalCorpus(organization_id=org.id, user_id=user.id, document_names=tuple(document_names))
+    # org_id/user_id (captured above), not org.id/user.id - a duplicate-
+    # content rollback during the loop above expires org/user just like it
+    # does mid-loop; this return statement hit that exact MissingGreenlet
+    # crash on a second run against an already-ingested corpus (found live
+    # while building the post-completion hardening performance tooling).
+    return EvalCorpus(organization_id=org_id, user_id=user_id, document_names=tuple(document_names))
 
 
 async def corpus_chunk_count(db: AsyncSession, organization_id: uuid.UUID) -> int:

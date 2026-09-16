@@ -719,8 +719,13 @@ infra/
 - [`docs/evaluation-baseline.md`](docs/evaluation-baseline.md) - the current
   baseline snapshot status (honestly: no live numeric baseline yet).
 - [`docs/aws-deployment.md`](docs/aws-deployment.md) - the full AWS
-  deployment writeup: architecture, cost analysis, security, two real
+  deployment writeup: architecture, cost analysis, security, real
   production incidents and their fixes, cleanup and rollback procedures.
+- [`docs/performance.md`](docs/performance.md) - the Performance +
+  Stability workstream report: local API/retrieval/ingestion/concurrency
+  benchmarks, a soak test, two real bugs found and fixed, and an honest
+  account of what was and wasn't measured (no real embedding latency, no
+  RAG quality baseline - LM Studio unavailable).
 - [`docs/demo.md`](docs/demo.md) - a suggested 3-5 minute live demo flow.
 - [`docs/interview.md`](docs/interview.md) - talking points for discussing
   this project in an interview, from a 30-second summary to deep dives on

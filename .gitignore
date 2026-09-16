@@ -34,6 +34,11 @@ minio_data/
 # dataset/fixtures, never committed (see docs/evaluation.md)
 backend/app/evaluation/results/
 
+# Performance workstream benchmark output - reproducible by re-running
+# backend/scripts/perf_test.py against the local stack, never committed
+# (see docs/performance.md)
+backend/scripts/perf_results/
+
 # OS
 .DS_Store
 Thumbs.db
