@@ -737,3 +737,53 @@ above for what was actually done and verified.)
 - Rebrand remaining "Nexus" strings in the frontend UI to "Retriva".
 - Registry/pinned-artifact rollback for backend/worker, matching what
   the frontend now has via the prebuilt-tarball deploy path.
+
+## Vercel frontend deployment - evaluated, not pursued (design gap, not a task left undone)
+
+The Next.js frontend can technically be built and hosted on Vercel - a
+platform audit found nothing in `next.config.ts`, the API client, or the
+Dockerfile that would prevent it (the app reads exactly one public env
+var, `NEXT_PUBLIC_API_URL`, inlined at build time; the Next.js app lives
+in `frontend/`, so a Vercel project would need Root Directory set to
+that subdirectory rather than the repo root). **It was not deployed**,
+for a reason specific to this app's authentication design, not to
+Vercel itself:
+
+**The current cross-site cookie authentication architecture is not
+compatible with a Vercel frontend + AWS API split without introducing
+an explicit cross-site authentication/CSRF design that does not exist
+today.** `backend/app/core/auth_cookies.py` hardcodes `samesite="lax"`
+on both the access and refresh cookies, and `SameSite=Lax` is this
+application's *only* CSRF defense - there is no CSRF token anywhere in
+the backend. A Vercel-hosted frontend and this AWS API are different
+sites, and browsers do not attach `SameSite=Lax` cookies to cross-site
+`fetch()`/XHR calls (only to top-level navigations) - a user could log
+in (the `Set-Cookie` response is still received and stored) but every
+subsequent authenticated call (`GET /users/me`, document list, the chat
+SSE stream) would go out with no cookie attached, silently dropping the
+session on the very next request.
+
+The standard fix for a legitimate cross-origin deployment is
+`SameSite=None; Secure` cookies plus an explicit CSRF-token layer to
+replace the protection `SameSite=Lax` currently provides for free. That
+is a real authentication/CSRF design change, not a config flag - it was
+deliberately not implemented here, since doing so would mean weakening
+the existing cookie security model precisely in order to make a
+platform migration convenient, which is backwards. **No cookie
+settings, CORS configuration, or backend authentication code were
+changed as a result of this evaluation** - `COOKIE_SECURE`,
+`HttpOnly`, `Secure`, and `SameSite=Lax` all remain exactly as they
+are today, and `CORS_ORIGINS` was not touched.
+
+**Current canonical production deployment remains AWS end-to-end**
+(nginx + Next.js frontend + FastAPI + Celery + Postgres/pgvector +
+Redis + MinIO, all same-origin behind the one `sslip.io` HTTPS
+endpoint - see the rest of this document). Vercel is recorded here as
+an **optional future deployment architecture**, contingent on first
+designing (not just flipping a flag for) cross-site session auth - for
+example, moving to `SameSite=None` cookies with a double-submit or
+synchronizer CSRF token, or switching the frontend to a
+bearer-token-in-memory model instead of cookies for the Vercel case
+specifically. Neither approach has been designed or implemented; this
+section exists so a future attempt starts from the right constraint
+instead of rediscovering it.
