@@ -58,7 +58,7 @@ from app.evaluation.eval_schemas import QADataset, load_qa_dataset
 from app.ingestion.errors import TransientProcessingError
 from app.rag.embedding.base import EmbeddingProviderUnavailableError
 from app.rag.embedding.dependency import get_embedding_provider
-from app.rag.llm.base import LLMProviderUnavailableError
+from app.rag.llm.base import LLMProviderTimeoutError, LLMProviderUnavailableError
 from app.rag.llm.dependency import get_llm_provider
 from app.storage.dependency import get_storage_provider
 
@@ -218,7 +218,14 @@ async def _run_all(args: argparse.Namespace) -> int:
                         ]
                         print(render_query_rewrite_report(rewrite_results))
                         print()
-                except LLMProviderUnavailableError as exc:
+                except (LLMProviderUnavailableError, LLMProviderTimeoutError) as exc:
+                    # LLMProviderTimeoutError is a deliberate sibling of
+                    # LLMProviderUnavailableError, not a subclass (see
+                    # app/rag/llm/base.py) - a slow-but-reachable local CPU
+                    # backend exceeding LLM_REQUEST_TIMEOUT_SECONDS is just as
+                    # unable to complete this evaluation as one that refused
+                    # the connection outright, so both are reported the same
+                    # way here rather than one crashing the whole run.
                     print(
                         "Generation/citation/injection evaluation not executed: "
                         f"LM Studio LLM unavailable ({exc}).",

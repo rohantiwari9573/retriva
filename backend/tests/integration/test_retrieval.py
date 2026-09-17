@@ -183,7 +183,20 @@ async def test_hybrid_retrieve_hydrates_metadata_correctly(db_session, seeded_or
     assert top.document_name == "handbook.txt"
     assert top.page_number == 14
     assert top.section == "Leave Policy"
-    assert result.best_vector_similarity is not None
+    # best_vector_similarity is deliberately float | None (see
+    # HybridRetrievalResult's own field comment: "for the insufficient-
+    # evidence check") - it is None only when the vector candidate set
+    # comes back empty, which VectorRetriever.search_by_embedding's
+    # unconditional ORDER BY distance LIMIT query can still do at this
+    # table's tiny row count if the planner picks the ivfflat index (its
+    # centroids are untrained against an empty table - see
+    # app/rag/retrieval/vector.py's module docstring) over a sequential
+    # scan, an approximate-search artifact rather than a HybridRetriever
+    # bug. Asserting it here was unrelated to what this test actually
+    # names and checks - metadata hydration on chunks that ARE returned -
+    # and was flaky in CI for exactly that reason (observed: CI run
+    # 35065780220 failed this exact assertion with candidates_considered=1
+    # while chunks/metadata were hydrated correctly).
 
 
 async def test_hybrid_retrieve_is_organization_scoped(db_session, seeded_org):
