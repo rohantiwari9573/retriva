@@ -115,8 +115,21 @@ class Settings(BaseSettings):
     # vector cosine similarity and Postgres ts_rank live on incompatible
     # scales, so combining them by rank rather than by (mis-normalized) value
     # is the mathematically defensible choice. See docs/retrieval.md.
-    VECTOR_SEARCH_WEIGHT: float = 0.7
-    KEYWORD_SEARCH_WEIGHT: float = 0.3
+    #
+    # Weights swapped from the original 0.7/0.3 (vector-favored) split after
+    # the first real (non-deterministic-fake) embedding baseline - see
+    # docs/evaluation-baseline.md's "RRF weight experiment" - showed
+    # keyword-only beating vector-only on this corpus (Recall@5 17.14% vs
+    # 8.57%, 35-case dataset v1) while the RRF fusion, weighted toward the
+    # *weaker* signal, actually lost to keyword-only alone (14.29% vs
+    # 17.14%). Re-running the identical evaluation with these weights
+    # (0.3/0.7) raised hybrid Recall@5 to 22.86%, beating keyword-only
+    # outright, with vector-only/keyword-only unchanged (confirming this was
+    # the only variable that moved). A single controlled experiment on one
+    # small corpus - re-tune if a larger/different corpus shows the opposite
+    # pattern, not a universal claim that keyword should always dominate.
+    VECTOR_SEARCH_WEIGHT: float = 0.3
+    KEYWORD_SEARCH_WEIGHT: float = 0.7
     RRF_K: int = 60
     # Applied to raw cosine similarity (1 - cosine distance) of the single
     # best vector hit, not to the fused RRF score - RRF scores aren't on a
