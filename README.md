@@ -676,10 +676,15 @@ infra/
   claim.
 - No live RAG evaluation baseline yet (LM Studio unavailable when the
   harness was built - see [RAG Evaluation](#rag-evaluation)).
-- The AWS deployment is single-instance with no HA, no managed database, no
-  automated backups, no billing alarm, and no automated TLS-certificate
-  renewal yet - see [AWS Deployment](#aws-deployment) and
-  [docs/aws-deployment.md](docs/aws-deployment.md) for the full list.
+- The AWS deployment is single-instance with no HA and no managed database
+  (a documented HA architecture proposal exists but is deliberately not
+  implemented - see `docs/architecture.md`'s "High-availability architecture
+  proposal"). Automated encrypted PostgreSQL backups and automated
+  Let's Encrypt TLS renewal ARE implemented and verified live (post-
+  completion hardening pass); there is still no AWS billing alarm (a
+  minimal IAM policy was drafted and presented but not yet granted) - see
+  [AWS Deployment](#aws-deployment) and
+  [docs/aws-deployment.md](docs/aws-deployment.md) for the full, precise list.
 - A set of internal *functional* identifiers still literally say "nexus"
   rather than "retriva": the session cookie names
   (`nexus_access_token`/`nexus_refresh_token`, shared between backend and
