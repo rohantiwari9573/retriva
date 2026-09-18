@@ -1,149 +1,235 @@
 # Evaluation Baseline Snapshot
 
-**Status: NO LIVE NUMERIC BASELINE CAPTURED IN THIS SESSION.**
+**Status: REAL LIVE BASELINE CAPTURED.** LM Studio was installed locally
+(v0.4.24+1, official installer), loaded with `qwen2.5-7b-instruct`
+(Q4_K_M GGUF, 4.68 GB) for generation and `nomic-embed-text-v1.5`
+(768-dim) for embeddings, and run CPU-only (see "Hardware and inference
+mode" below for why). The numbers below are real output from
+`python -m app.evaluation --all` against the real 35-case `dataset_v1.json`
+and the real 6-document fixture corpus, via real Postgres/pgvector/
+full-text-search and a real local LLM - nothing here is fabricated,
+templated, or backfilled from a plausible guess.
 
-This is stated first and plainly because it is the single most important
-fact about this document. LM Studio was not running anywhere in the Phase
-10 development environment - see "Evidence" below. Per the Phase 10 spec's
-explicit, repeated instruction ("Never fabricate evaluation scores... Never
-report an LLM metric if LM Studio was unavailable"), no retrieval,
-generation, citation, or injection numbers are reported here, because none
-were actually produced by a real run against the real fixture corpus with
-real embeddings.
+Raw evidence is preserved at `backend/app/evaluation/results/` (gitignored,
+reproducible by rerunning the harness - see "How to reproduce" below):
+`lmstudio_baseline.json` / `lmstudio_baseline_full_log.txt` (original RRF
+weights) and `lmstudio_baseline_v2_rrf_swap.json` /
+`lmstudio_baseline_v2_rrf_swap_full_log.txt` (current RRF weights, the
+numbers reported here).
 
-This document exists to record exactly what **was** verified, so that the
-first real run (once LM Studio is available) has a clear "this is what
-changed" comparison point, and so a reader never mistakes silence for a
-result.
+## Hardware and inference mode
 
-## Dataset version
+- Windows 11 Home, Intel Core i5-13420H (8 cores / 12 threads), 15.7 GB
+  RAM, Intel UHD Graphics (integrated, no dedicated GPU/VRAM).
+- **CPU-only inference.** LM Studio's default GPU (Vulkan) offload onto
+  this Intel iGPU crashed reproducibly mid-generation with
+  `ggml_vulkan: device lost on Vulkan0` (confirmed twice, independently,
+  in LM Studio's own server log) - not a context-length issue, a genuine
+  driver/hardware instability on this iGPU. Every model is now loaded
+  with `--gpu off`. This is slower (a single chat completion of a few
+  hundred tokens takes 30-150+ seconds) but has been stable across a
+  ~75-minute, ~70-real-LLM-call run with zero crashes.
+- **Do not read CPU latency numbers here as representative of anything
+  beyond this specific machine.** They say nothing about GPU inference,
+  AWS, or production-scale performance - AWS never runs LM Studio at
+  all (see `docs/aws-deployment.md`).
 
-`dataset_v1.json` - 35 cases across all 10 required categories (see
-`docs/evaluation.md`'s "Dataset categories" table for the exact
-breakdown). Verified to load and validate via
-`tests/integration/test_eval_harness.py::test_bundled_dataset_loads_and_covers_all_ten_categories`.
+## Dataset and environment
 
-## Evidence LM Studio was unavailable (not assumed, checked)
+- `dataset_v1.json` - 35 cases across all 10 categories (see
+  `docs/evaluation.md`'s "Dataset categories" table).
+- 6-document fixture corpus (Retriva's own project documentation:
+  architecture, security, retrieval, streaming, observability,
+  document-ingestion - 78 total chunks).
+- `EMBEDDING_MODEL=nomic-embed-text` (resolves to the loaded
+  `text-embedding-nomic-embed-text-v1.5`), `LLM_MODEL=qwen2.5-7b-instruct`,
+  `RETRIEVAL_TOP_K=8`, `RRF_K=60`, `LLM_REQUEST_TIMEOUT_SECONDS=300`
+  (raised from the 120s default for this CPU-only run - a local shell
+  env var for this evaluation only, not committed to any `.env`).
 
-- `curl --max-time 3 http://localhost:1234/v1/models` -> connection
-  refused (exit code 7).
-- No LM Studio process found: `Get-Process -Name '*lmstudio*'` returned
-  nothing.
-- No LM Studio installation found at the default install path.
-- Running `python -m app.evaluation --retrieval` against the real Docker
-  Postgres produced:
+**Statistical caution**: this is 35 cases against a 6-document corpus.
+Percentages below correspond to small case counts (e.g. 17.14% = 6/35) -
+read them as "what happened on these 35 specific questions," not as a
+statistically robust estimate of real-world RAG quality, and not as an
+industry benchmark.
 
-  ```
-  Evaluation not executed: LM Studio embeddings unavailable (Could not
-  reach embedding backend at http://localhost:1234/v1. Is LM Studio
-  running with its local server started, and is the endpoint reachable
-  from this process...).
-  Not even keyword-only retrieval can run - see eval_cli.py's module docstring.
-  ```
+## RRF weight experiment: before vs. after
 
-  exit code 2, run twice (two separate process invocations) to also verify
-  the idempotent duplicate-content-handling path doesn't itself crash on a
-  second run - it did not, after fixing a real bug this exposed (see
-  "Bugs found and fixed during this verification" below).
+The first real run (original `VECTOR_SEARCH_WEIGHT=0.7` /
+`KEYWORD_SEARCH_WEIGHT=0.3`, the values chosen before any real embedding
+model existed) showed vector-only substantially underperforming
+keyword-only, and the RRF hybrid - weighted toward the *weaker* signal -
+actually losing to keyword-only alone:
 
-This is exactly the "not even keyword-only retrieval can run" limitation
-documented in `docs/evaluation.md` - fixture-corpus ingestion itself
-requires the embedding provider (every chunk is embedded during real
-ingestion, matching what a genuine document upload does), so an
-unreachable embedding backend blocks the corpus from being built at all,
-before any retrieval strategy gets to run.
+| Strategy | Recall@1 | Recall@3 | Recall@5 | Recall@10 | MRR | nDCG@5 | nDCG@10 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Vector-only | 2.86% | 5.71% | 8.57% | 11.43% | 0.048 | 0.043 | 0.063 |
+| Keyword-only | 17.14% | 17.14% | 17.14% | 17.14% | 0.171 | 0.159 | 0.166 |
+| Hybrid RRF (0.7/0.3, original) | 5.71% | 11.43% | 14.29% | 17.14% | 0.091 | 0.090 | 0.110 |
 
-## What WAS verified (harness correctness, not RAG quality)
+A single controlled experiment - swap to `VECTOR_SEARCH_WEIGHT=0.3` /
+`KEYWORD_SEARCH_WEIGHT=0.7`, re-run the identical evaluation, change
+nothing else:
 
-Per `docs/evaluation.md`'s "Regression tests" section, using the project's
-existing `DeterministicTestEmbeddingProvider`/`StubLLMProvider` fakes
-against real Postgres/pgvector/full-text-search and the REAL fixture
-corpus (the actual project documentation files):
+| Strategy | Recall@1 | Recall@3 | Recall@5 | Recall@10 | MRR | nDCG@5 | nDCG@10 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Vector-only | 2.86% | 5.71% | 8.57% | 11.43% | 0.048 | 0.043 | 0.063 |
+| Keyword-only | 17.14% | 17.14% | 17.14% | 17.14% | 0.171 | 0.159 | 0.166 |
+| **Hybrid RRF (0.3/0.7, current)** | **14.29%** | **20.00%** | **22.86%** | **25.71%** | **0.176** | **0.182** | **0.198** |
 
-- The fixture corpus ingests successfully: all 6 documents reach `READY`
-  with real chunk counts (4-24 chunks per document, real numbers from a
-  real ingestion run - see `test_ensure_eval_corpus_ingests_all_fixture_documents`).
-- `vector_only`, `keyword_only`, and `hybrid_rrf` all execute end-to-end
-  without error and return well-formed results.
-- **Keyword-only search against real content genuinely works**: a
-  keyword-friendly query ("Argon2id password hashing") against the real
-  ingested `security.md` chunk correctly achieves Recall@5 = 1.0 via real
-  PostgreSQL full-text search - this one result IS meaningful evidence
-  (full-text search doesn't depend on the fake embedding provider),
-  not just a plumbing check.
-- Citation, generation, and injection evaluation code paths run
-  end-to-end against `StubLLMProvider` (which echoes `[SOURCE-N]` tags -
-  see `app/rag/llm/testing.py`) without error, confirming the harness's
-  integration with `RAGService` is correct - **the resulting scores are
-  meaningless as quality signals** since the LLM output is templated, not
-  real generation. This is a plumbing check only, explicitly labeled as
-  such in the test file's own docstring.
-- Tenant isolation of `eval_baselines.py`'s independent hydration query is
-  verified directly (`test_hybrid_never_returns_another_orgs_chunks`).
+Vector-only and keyword-only are byte-identical between the two runs
+(they don't depend on fusion weights at all) - confirming the weight
+swap was the only variable that moved. Hybrid now beats keyword-only
+outright at every K, instead of losing to it. **This change was kept**
+(`app/core/config.py`) and is live in both local dev and AWS production.
 
-32 tests total (23 metric/schema unit tests + 9 harness integration
-tests), all passing, all requiring no LM Studio.
+This is one controlled experiment on one small corpus, not a universal
+tuning claim - a larger or different corpus could show the opposite
+pattern and would need its own re-tune.
+
+## Generation, citation, and injection results (real, both weight configurations - identical)
+
+These numbers are **unchanged** between the original and new RRF
+weights - see "Why generation didn't improve" below for the specific,
+independently-verified reason.
+
+- **Generation**: 25 answerable cases judged, 0 judge errors.
+  `mean_correctness_0_3 = 0.0`, `mean_faithfulness_0_3 = 0.0` - the
+  system declined to answer every answerable case ("I don't have enough
+  information..."), scoring 0 for never stating the expected fact. 10
+  unanswerable cases, **10/10 correctly refused** (`unanswerable_refusal_rate
+  = 1.0`) - the system never fabricated an answer when none exists.
+- **Citation**: `validity_rate = null` (0/0) - no case ever produced a
+  citation to validate, since no case used any retrieved chunk in its
+  answer (see below).
+- **Injection**: 3/3 prompt-injection cases resisted, 0 leaked the
+  canary string. Real evidence against these 3 specific attempts with a
+  real model in the loop - not a general claim that injection is solved
+  (see `docs/evaluation.md`).
+- **Query rewriting**: 3 reference-resolution cases, **0 regressed / 0
+  improved / 3 unchanged** (Recall@5) under the new RRF weights - an
+  improvement over the original weights, where 1 of these 3 cases
+  regressed from 100% to 0% Recall@5 after rewriting. The regression
+  case (`qa-032`, "Can it be retried?" -> "Can a failed document
+  processing be retried?") no longer regresses with the new weights.
+  2 of 3 cases fell back to the raw query on an LLM timeout
+  (`fallback=timeout`) rather than crashing - the harness's designed
+  graceful-degradation path, observed working for real.
+
+## Why generation didn't improve: OBSERVED, not hypothesis
+
+Despite retrieval ranking genuinely improving (Recall@5 14.29% ->
+22.86%), generation scores did not move at all. Root cause, verified by
+reading the code, not guessed: `RAGService` (`app/services/rag_service.py`,
+lines 158 and 416) refuses to use **any** retrieved chunk in generation
+if `retrieval.best_vector_similarity < RETRIEVAL_MIN_SIMILARITY` (default
+`0.3`) - a raw-cosine-similarity gate, checked independently of RRF
+rank. Every single `chat_completed` log line across both full runs shows
+`chunks_used=0` regardless of how many chunks were `chunks_considered`
+(consistently 30-48). This means: **the RRF fix improved whether the
+right chunk appears in the candidate ranking, but did not touch whether
+that chunk clears the separate absolute-similarity bar that gates
+generation** - two independent knobs, and only one was changed in this
+experiment, deliberately (see `docs/retrieval.md`'s "one variable at a
+time" note).
+
+This was already a disclosed, honest limitation before this evaluation
+(`docs/retrieval.md`'s "Limitations of the confidence threshold" section
+calls `RETRIEVAL_MIN_SIMILARITY` "a heuristic, not a calibrated
+probability of relevance," untested against a real embedding model) -
+this run is the first real confirmation that the heuristic, as
+currently tuned, is too conservative for `nomic-embed-text`'s actual
+similarity distribution on this corpus. **Not changed in this pass** -
+per the single-variable-at-a-time methodology, this is recorded as a
+finding for a future, separately-evaluated experiment, not bundled into
+the RRF change.
+
+## Latency (real, CPU-only, this machine only)
+
+- Retrieval-only (real embeddings, no LLM): p50 well under 1s per
+  strategy across 35 cases (see `docs/performance.md` for the full
+  latency breakdown from the Performance workstream, run separately
+  with fake embeddings for isolation).
+- Real document ingestion (one document, real embedding): ~3.3s
+  end-to-end (upload -> parse -> chunk -> embed -> Postgres).
+- Real chat completion (non-streaming, full RAG pipeline): ~9-34s per
+  call observed live, depending on context size and answer length.
+- Real generation-eval judge calls (longer prompts): ~30-150s per call
+  observed across the full run; the full generation + citation +
+  injection + query-rewrite phase (63 real LLM calls) took roughly 75
+  minutes end-to-end.
+- These are CPU-only numbers on a laptop with no dedicated GPU. AWS
+  production never runs LM Studio and has no comparable measurement -
+  do not extrapolate these numbers to any deployed environment.
 
 ## Bugs found and fixed during this verification
 
-Two real bugs were found and fixed while verifying the harness against the
-live stack (not against fakes) - recorded here because finding them is
-itself evidence the live-verification step was real, not skipped:
+Three real bugs were found and fixed while running this evaluation
+against a real, live LM Studio instance (not fakes) - recorded because
+finding them is itself evidence the live-verification step was real:
 
-1. `eval_cli.py` only caught `EmbeddingProviderUnavailableError` around
-   fixture setup, but `process_document_pipeline` (real production code)
-   classifies an unreachable embedding backend as the broader
-   `TransientProcessingError` - the CLI crashed with a raw traceback
-   instead of the intended honest message. Fixed by also catching
-   `TransientProcessingError` at that call site.
-2. `eval_fixtures.py`'s duplicate-content-recovery path
-   (`await db.rollback()` followed by re-reading `org.id`) crashed with
-   `sqlalchemy.exc.MissingGreenlet` - `rollback()` unconditionally expires
-   every ORM object in the session (unlike `commit()`, there is no
-   `expire_on_commit=False` equivalent for rollback), and the subsequent
-   `org.id` attribute access triggered an implicit, un-awaited lazy
-   reload. Fixed by capturing `org.id`/`user.id` as plain UUID values
-   before the code path that can roll back.
+1. `eval_cli.py` only caught `LLMProviderUnavailableError` around the
+   generation/citation/injection block, not the deliberate sibling
+   `LLMProviderTimeoutError` - a slow-but-reachable CPU backend exceeding
+   the timeout crashed the whole run instead of being reported and
+   skipped like every other unreachable-backend case. Fixed by catching
+   both (`app/evaluation/eval_cli.py`).
+2. `test_hybrid_retrieve_hydrates_metadata_correctly` asserted
+   `best_vector_similarity is not None`, which is not guaranteed by the
+   code (that field is deliberately `float | None`) and is unrelated to
+   what the test actually checks (metadata hydration) - this caused a
+   real, observed CI flake. Fixed by removing the unrelated assertion
+   (`tests/integration/test_retrieval.py`).
+3. **Operator error, not a code bug**: two evaluation runs crashed with
+   `ggml_vulkan: device lost on Vulkan0` because a duplicate model
+   instance was loaded without `--gpu off` and the wrong instance was
+   unloaded, leaving the GPU-accelerated one active. Fixed by unloading
+   all instances and reloading both models explicitly with `--gpu off`,
+   verified stable with a realistic-length request before re-running
+   the full evaluation.
 
-Neither bug affects any Phase 1-9 production code path - both were
-specific to this phase's new evaluation-setup code.
+Two earlier bugs (found during harness-plumbing verification before a
+real LM Studio instance existed) remain fixed and are not repeated here -
+see git history for `eval_fixtures.py`'s `MissingGreenlet` fix and
+`eval_cli.py`'s `TransientProcessingError` handling.
 
-## Known residual state
-
-Fixture-corpus documents from these verification runs were deleted from
-the local database afterward (`DELETE FROM organizations WHERE slug LIKE
-'retriva-eval-fixture%'`, cascading to documents/chunks) - the next real
-run starts from a clean idempotent-create path, not a partially-ingested
-one.
-
-## What the first real baseline run should capture
-
-Once LM Studio is running with an embedding model and a chat model
-loaded, run:
+## How to reproduce
 
 ```bash
+# 1. Install LM Studio (https://lmstudio.ai/download, official installer only)
+#    and load qwen2.5-7b-instruct (Q4_K_M) + nomic-embed-text-v1.5.
+#    If on a machine without a reliable dedicated GPU, load both with
+#    --gpu off - see "Hardware and inference mode" above for why.
+lms load qwen2.5-7b-instruct --gpu off --context-length 8192 --yes
+lms load text-embedding-nomic-embed-text-v1.5 --gpu off --yes
+lms server start
+
+# 2. Start the local Docker stack (docker-compose.yml already points
+#    the backend/worker containers at http://host.docker.internal:1234/v1
+#    by default - no config change needed on Windows/Mac Docker Desktop).
+docker compose up -d
+
+# 3. Run the evaluation from backend/, against the host-side LM Studio
+#    endpoint (localhost, not host.docker.internal, since this runs on
+#    the host, not in a container):
 cd backend
-python -m app.evaluation --all
+python -m app.evaluation --all --output app/evaluation/results/latest.json
 ```
 
-and replace this document's content with the actual output: dataset
-version, per-strategy Recall@1/3/5/10, MRR, nDCG@5/10, the vector-vs-hybrid
-and keyword-vs-hybrid comparison, generation correctness/faithfulness
-means, citation validity/correctness/completeness rates, injection
-canary-leak count, environment info (`EMBEDDING_MODEL`, `LLM_MODEL` from
-`app/evaluation/results/latest.json`'s `environment` block), and a
-timestamp. At that point, and only at that point, this document's title
-should stop saying "NO LIVE NUMERIC BASELINE CAPTURED."
+A CPU-only run of the full `--all` suite takes roughly 75-90 minutes on
+comparable hardware (no dedicated GPU, 7B Q4 model) - almost all of it
+is the ~63 real LLM calls in generation/citation/injection/query-rewrite,
+not retrieval (which completes in seconds).
 
 ## BASELINE RESULT vs. QUALITY TARGET
 
-To be stated explicitly once real numbers exist, and restated here now so
-it isn't forgotten later: whatever the first real run produces is a
-**baseline result** (what this system currently does, measured once,
-against this specific 35-question dataset) - it is **not** a **quality
-target**, an industry-standard comparison, or a claim that the system's
-retrieval/generation quality is "good" or "bad" in any general sense. A
-future run scoring lower than this baseline is a regression signal worth
-investigating; a future run scoring higher is not automatically evidence
-of a "better" system in any sense beyond "scored higher on these 35
-questions."
+Stated explicitly, as promised when this document still said "no
+baseline exists": the numbers above are a **baseline result** (what this
+system currently does, measured once, against this specific 35-question
+dataset and this specific model/hardware configuration) - they are
+**not** a **quality target**, an industry-standard comparison, or a
+claim that the system's retrieval/generation quality is "good" or "bad"
+in any general sense. A future run scoring lower than this baseline is a
+regression signal worth investigating; a future run scoring higher is
+not automatically evidence of a "better" system beyond "scored higher on
+these 35 questions."

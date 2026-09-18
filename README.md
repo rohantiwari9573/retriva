@@ -283,23 +283,42 @@ actually runs in the app.
   tests: unit tests for the metric math, integration tests against real
   Postgres/pgvector/full-text search using deterministic test doubles).
 
-**TESTED:** All 32 regression tests pass without LM Studio. One genuinely
-meaningful non-mocked result exists: a keyword-only PostgreSQL full-text
-search query against real ingested content achieved Recall@5 = 1.0,
-because full-text search doesn't depend on the (fake) embedding provider
-used in those tests.
+**TESTED:** All 32 regression tests pass without LM Studio.
 
-**NOT VERIFIED / no live baseline:** **No live numeric RAG quality baseline
-was captured, because LM Studio was unavailable during the evaluation run**
-(checked directly - connection refused, no LM Studio process found - not
-assumed). Retrieval baseline scores (Recall@K/MRR/nDCG), generation
-correctness/faithfulness, citation validity rates, and injection-resistance
-numbers **do not exist yet** for this dataset. The harness is implemented
-and its own plumbing is tested; the actual quality measurement is the next
-thing to run once LM Studio is available, per
-[docs/evaluation-baseline.md](docs/evaluation-baseline.md), which documents
-exactly what a first real run should capture and how to interpret it (a
-baseline result, not a quality target or an industry benchmark).
+**VERIFIED LIVE - a real numeric baseline now exists.** LM Studio was
+installed locally (Qwen2.5-7B-Instruct Q4_K_M + nomic-embed-text-v1.5,
+CPU-only inference - see "Local RAG evaluation baseline" below) and the
+full harness was run for real against the 35-case dataset and the real
+6-document corpus:
+
+| Strategy | Recall@1 | Recall@3 | Recall@5 | Recall@10 | MRR | nDCG@5 | nDCG@10 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| Vector-only | 2.86% | 5.71% | 8.57% | 11.43% | 0.048 | 0.043 | 0.063 |
+| Keyword-only | 17.14% | 17.14% | 17.14% | 17.14% | 0.171 | 0.159 | 0.166 |
+| Hybrid RRF | 14.29% | 20.00% | 22.86% | 25.71% | 0.176 | 0.182 | 0.198 |
+
+Generation: 25/25 answerable cases scored `correctness=0/3,
+faithfulness=0/3` (the system declined to answer rather than fabricate -
+see below for why), 10/10 unanswerable cases correctly refused. Citation
+validity: undefined (0/0 - no case cited anything, same root cause).
+Injection: 3/3 resisted, 0 leaked. Query rewriting: 0 regressed / 0
+improved / 3 unchanged.
+
+**Why generation stayed at 0 despite better retrieval**: a real,
+verified-in-code finding, not a guess - `RETRIEVAL_MIN_SIMILARITY`
+(default 0.3) independently gates whether `RAGService` uses *any*
+retrieved chunk in generation, regardless of its RRF rank. Every real
+run showed `chunks_used=0` in every case. This is a disclosed, pre-existing
+limitation (`docs/retrieval.md`) now confirmed empirically against a real
+embedding model rather than assumed - and deliberately **not** changed in
+this pass, per a single-variable-at-a-time evaluation methodology. See
+[docs/evaluation-baseline.md](docs/evaluation-baseline.md) for the full
+before/after RRF comparison, per-case diagnosis, and reproduction steps.
+
+This is a **baseline result on 35 cases against a 6-document corpus**, not
+a quality target, industry benchmark, or claim about RAG systems in
+general - see docs/evaluation-baseline.md for the full statistical
+caution and methodology.
 
 See [docs/evaluation.md](docs/evaluation.md) for the full methodology.
 
@@ -659,7 +678,13 @@ infra/
   `docs/retrieval.md`.
 - `RETRIEVAL_MIN_SIMILARITY` is a heuristic confidence threshold, not a
   calibrated relevance probability - see `docs/retrieval.md`'s limitations
-  section.
+  section. **Now confirmed empirically, not just theoretically**: the real
+  LM Studio baseline showed this threshold gating chunk usage to zero in
+  every evaluated case regardless of retrieval rank - see
+  [docs/evaluation-baseline.md](docs/evaluation-baseline.md)'s "Why
+  generation didn't improve" section. Deliberately not retuned in this
+  pass (single-variable-at-a-time methodology) - a documented finding for
+  a future, separately-evaluated experiment.
 - Prompt-injection defense is verified at the prompt-construction level
   (malicious document text is provably confined to the untrusted-context
   delimiters) but NOT at the model-response level without a real LLM in the
@@ -674,8 +699,12 @@ infra/
   distributed/production-grade one - see `docs/security.md`'s Known
   limitations for the full, precise list of what Phase 7 does and doesn't
   claim.
-- No live RAG evaluation baseline yet (LM Studio unavailable when the
-  harness was built - see [RAG Evaluation](#rag-evaluation)).
+- The real RAG baseline was captured CPU-only on a laptop with no
+  dedicated GPU (LM Studio's Vulkan GPU offload crashed reproducibly on
+  this machine's integrated graphics - see
+  [docs/evaluation-baseline.md](docs/evaluation-baseline.md)); generation
+  latency (30-150s/call) reflects that, not GPU inference or any
+  production environment.
 - The AWS deployment is single-instance with no HA and no managed database
   (a documented HA architecture proposal exists but is deliberately not
   implemented - see `docs/architecture.md`'s "High-availability architecture

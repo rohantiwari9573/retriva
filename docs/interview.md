@@ -182,17 +182,21 @@ first thing that would need addressing before the application layer.
 
 - Single EC2 instance = no HA, a real single point of failure - accepted
   because this is a portfolio deployment, not a production commitment.
-- No managed database = no automated backups on AWS currently - a real
-  gap, documented, not fixed in this phase since fixing it would mean
-  either paying for RDS or building a backup script, both out of scope
-  for a documentation phase.
+- No managed database - self-hosted Postgres+pgvector in Docker instead.
+  Automated encrypted backups and TLS renewal are implemented and
+  verified live (a documented, deliberate choice over paying for RDS);
+  no AWS billing alarm yet (IAM policy drafted, not granted).
 - SSH key-based CI/CD deploy instead of OIDC + IAM role - a deliberate
   choice given the AWS credentials are a shared, multi-project IAM user;
   granting `iam:CreateRole` on it was judged a bigger blast-radius change
   than an SSH key scoped to one instance.
-- No live RAG evaluation numbers - the harness measures the right things
-  (Recall@K, MRR, nDCG, generation correctness/faithfulness, citation
-  validity, injection resistance) and its own plumbing is tested, but the
-  actual quality measurement requires LM Studio, which wasn't available
-  when it was built. This is stated plainly rather than filled in with a
-  plausible-sounding number.
+- **Real RAG evaluation numbers now exist** (LM Studio installed locally,
+  CPU-only, Qwen2.5-7B-Instruct + nomic-embed-text) - hybrid retrieval
+  Recall@5 22.86% on the 35-case dataset, beating keyword-only (17.14%)
+  after a controlled RRF-weight experiment. Generation correctness stayed
+  at 0/3 despite better retrieval ranking, for a specific, code-verified
+  reason: `RETRIEVAL_MIN_SIMILARITY` independently gates chunk usage below
+  the ranking stage, and real embeddings never cleared it on this small
+  corpus - a good concrete example of "measure before optimizing" and of
+  a RAG system correctly declining to answer rather than fabricating. See
+  `docs/evaluation-baseline.md` for the full numbers and diagnosis.

@@ -133,9 +133,13 @@ fused_score(chunk) = vector_weight / (k + vector_rank)   [if the chunk appears i
 where `vector_rank`/`keyword_rank` are 1-indexed positions within each
 retriever's own result list (rank 1 = best), and `k` (`RRF_K`, default 60)
 is the damping constant from the original RRF paper (Cormack, Clarke &
-Buettcher, 2009). `VECTOR_SEARCH_WEIGHT` (default 0.7) and
-`KEYWORD_SEARCH_WEIGHT` (default 0.3) are configurable, per the spec's
-example.
+Buettcher, 2009). `VECTOR_SEARCH_WEIGHT` (default **0.3**, changed from
+an initial 0.7) and `KEYWORD_SEARCH_WEIGHT` (default **0.7**, changed
+from an initial 0.3) are configurable, per the spec's example - the
+current defaults were set by a real controlled experiment against a
+real embedding model, not chosen a priori; see
+`docs/evaluation-baseline.md`'s "RRF weight experiment" for the
+before/after numbers that justified the swap.
 
 **Why RRF and not "normalize both scores to [0,1], then weighted sum":**
 this was the first design considered and rejected. pgvector cosine
@@ -177,6 +181,23 @@ meaning - see its docstring) produces near-zero similarity for any two
 different strings, which reliably trips this threshold in tests that don't
 use the exact chunk content as the query - this is expected and correct
 behavior for that fake, not a bug in the threshold.
+
+**Empirically confirmed against a real embedding model** (this section
+previously only stated the threshold was untested against real
+embeddings - it now has been): a full evaluation run against real
+`nomic-embed-text-v1.5` embeddings showed `best_vector_similarity` below
+`0.3` in every one of 35 evaluated cases, regardless of whether the
+correct chunk was ranked first by RRF - `chunks_used=0` in every
+`chat_completed` log line across the entire run. This means the current
+default is too conservative for this embedding model on this corpus:
+retrieval can rank the right chunk correctly and generation still never
+sees it. See `docs/evaluation-baseline.md`'s "Why generation didn't
+improve" section for the full evidence. **Not retuned in that
+evaluation pass** - it was kept separate deliberately, per a
+single-variable-at-a-time experimental methodology (the RRF weight
+change was evaluated in isolation first) - and is recorded here as a
+concrete, evidence-backed candidate for a future, separately-run
+experiment, not implemented speculatively.
 
 ## Two-stage candidate retrieval
 

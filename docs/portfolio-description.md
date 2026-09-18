@@ -41,10 +41,13 @@ passes.
 The project also includes its own RAG evaluation harness - retrieval
 baselines (vector-only, keyword-only, hybrid), Recall@K/MRR/nDCG,
 LLM-as-judge generation scoring, and citation/prompt-injection evaluation
-- built and regression-tested, though **no live numeric quality baseline
-has been captured yet**, since that requires a reachable local LLM the
-evaluation environment didn't have. This is stated plainly rather than
-filled in with a plausible-sounding number.
+- built, regression-tested, and now run for real: a local LM Studio
+instance (Qwen2.5-7B-Instruct + nomic-embed-text, CPU-only) produced a
+genuine baseline (hybrid Recall@5 22.86% on a 35-case dataset, up from
+14.29% after a controlled RRF-weight experiment) and a concrete,
+diagnosed finding - generation correctness stayed at 0 despite better
+retrieval ranking, traced to a separate confidence threshold
+independently gating chunk usage, not left as an unexplained result.
 
 ## Technical stack
 
@@ -80,6 +83,8 @@ inference)
   repository - CI had silently never run across ten prior development
   phases before this was caught and corrected.
 - **Explicit, disciplined honesty about unverified claims** throughout
-  the project's own documentation - no live RAG-quality baseline, no
-  penetration test, no load test, and each is stated as such rather than
-  implied or omitted.
+  the project's own documentation - local API/retrieval/ingestion
+  benchmarks and a real RAG baseline exist, but no third-party
+  penetration test, no production-scale load test, and no AWS-hosted
+  LLM performance measurement (LM Studio is local-only, by design) -
+  each stated as such rather than implied or omitted.

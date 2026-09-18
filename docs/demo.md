@@ -111,9 +111,12 @@ Close by walking through the architecture diagram in the README - hybrid
 retrieval, async ingestion via Celery, the AWS deployment (single EC2
 instance, self-hosted Postgres/Redis/MinIO, real HTTPS via Let's Encrypt +
 `sslip.io`, GitHub Actions CI/CD gating a deploy job) - and the RAG
-evaluation harness, being explicit that **no live numeric RAG-quality
-baseline exists yet** (LM Studio wasn't reachable when the harness was
-built - see `docs/evaluation-baseline.md`).
+evaluation harness - a real, local CPU-only baseline now exists (hybrid
+retrieval Recall@5 22.86% on the 35-case dataset, after a controlled RRF
+weight experiment; generation still declines to answer on this small
+corpus for a specific, diagnosed reason - `RETRIEVAL_MIN_SIMILARITY`
+independently gates chunk usage - see `docs/evaluation-baseline.md` for
+the full numbers).
 
 ## A note on demoing against the live AWS deployment specifically
 

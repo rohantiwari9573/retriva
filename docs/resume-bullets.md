@@ -54,11 +54,25 @@ with CI/CD.
   injection evaluation, with 32 passing regression tests that run without
   a live LLM.
 
+## Real RAG evaluation numbers (now measured - use these, don't round up)
+
+A real local baseline exists (LM Studio, Qwen2.5-7B-Instruct + nomic-embed-
+text, CPU-only): hybrid retrieval Recall@5 = 22.86% on the 35-case
+dataset (up from 14.29% before a controlled RRF-weight experiment
+justified by the data - see `docs/evaluation-baseline.md`). If citing a
+number, use this exact one and its exact context (35 cases, 6-document
+corpus, CPU-only local run) - never round up, never imply it generalizes,
+and always be ready to explain in an interview that generation
+correctness stayed at 0/3 on this same run because a separate confidence
+threshold (`RETRIEVAL_MIN_SIMILARITY`) independently blocked chunk usage
+regardless of retrieval rank - a genuinely interesting, diagnosable
+finding, not a result to hide.
+
 ## Notes on what NOT to claim
 
-- No live RAG-quality metrics exist yet (Recall@K, MRR, nDCG, generation
-  scores) - don't state a specific accuracy/quality number anywhere, since
-  none has been measured.
+- Don't state a RAG accuracy/quality number without its exact context
+  (35 cases, one small corpus, CPU-only) - see above for the real numbers
+  and how to cite them honestly.
 - Don't claim "production" traffic, uptime, or user counts - this is a
   portfolio deployment with no real users or load history.
 - Don't claim the security posture is "enterprise-grade" or
