@@ -26,7 +26,7 @@ for development, not for a public URL someone else visits.
 
 ```
 Google Gemini API (generativelanguage.googleapis.com)
-    gemini-2.5-flash (chat, via the OpenAI-compatible endpoint)
+    gemini-3.6-flash (chat, via the OpenAI-compatible endpoint)
     gemini-embedding-001 (embeddings, output_dimensionality=768)
         |
         v
@@ -106,7 +106,7 @@ one commented out). Summary:
 | `LLM_PROVIDER` | `openai_compatible` | `openai_compatible` (same value - see below) |
 | `LLM_BASE_URL` | `http://host.docker.internal:1234/v1` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `LLM_API_KEY` | `not-needed-for-local` | your real Gemini key (server-side only) |
-| `LLM_MODEL` | `qwen2.5-7b-instruct` | `gemini-2.5-flash` |
+| `LLM_MODEL` | `qwen2.5-7b-instruct` | `gemini-3.6-flash` |
 | `EMBEDDING_PROVIDER` | `openai_compatible` | `gemini` |
 | `EMBEDDING_BASE_URL` | `http://host.docker.internal:1234/v1` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `EMBEDDING_API_KEY` | `not-needed-for-local` | your real Gemini key (server-side only) |

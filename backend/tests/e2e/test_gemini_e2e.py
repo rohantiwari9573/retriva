@@ -17,7 +17,7 @@ To run for real:
     export EMBEDDING_MODEL=gemini-embedding-001
     export LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
     export LLM_API_KEY=<your real key, never committed>
-    export LLM_MODEL=gemini-2.5-flash
+    export LLM_MODEL=gemini-3.6-flash
     pytest tests/e2e/test_gemini_e2e.py -v
 """
 

@@ -159,8 +159,18 @@ class GeminiEmbeddingProvider:
             ) from exc
 
         try:
-            data = sorted(body["data"], key=lambda item: item["index"])
-            vectors = [item["embedding"] for item in data]
+            raw_items = body["data"]
+            # Unlike standard OpenAI (and LM Studio), Gemini's real
+            # OpenAI-compatible /embeddings response omits the `index`
+            # field on each item entirely (confirmed live: response items
+            # only carry `object`/`embedding`) - sorting by an index that
+            # doesn't exist would KeyError. Sort only when every item
+            # actually has one (still correct for any endpoint that does
+            # include it); otherwise trust response order, which for
+            # Gemini's batch embeddings matches request order.
+            if all("index" in item for item in raw_items):
+                raw_items = sorted(raw_items, key=lambda item: item["index"])
+            vectors = [item["embedding"] for item in raw_items]
         except (KeyError, TypeError) as exc:
             raise EmbeddingProviderUnavailableError(
                 "Gemini embedding backend returned an unexpected response shape."

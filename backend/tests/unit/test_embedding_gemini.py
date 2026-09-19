@@ -103,6 +103,27 @@ async def test_embed_documents_returns_correctly_ordered_normalized_vectors(monk
     assert vectors == [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]
 
 
+async def test_response_without_index_field_trusts_response_order(monkeypatch):
+    # Confirmed live against the real Gemini API: its /embeddings response
+    # items carry only `object`/`embedding`, no `index` at all - unlike
+    # standard OpenAI. Sorting by a missing key would KeyError; the
+    # provider must fall back to trusting response order instead.
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Each input gets a distinguishably-directioned vector, in request
+        # order, so the assertion actually proves order was preserved
+        # (not just that normalization happened).
+        shapes = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]
+        body = json.loads(request.content)
+        data = [
+            {"object": "embedding", "embedding": shapes[i]} for i in range(len(body["input"]))
+        ]
+        return httpx.Response(200, json={"object": "list", "data": data, "model": "m"})
+
+    provider = _patched_provider(monkeypatch, handler)
+    vectors = await provider.embed_documents(["a", "b"])
+    assert vectors == [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]
+
+
 async def test_empty_input_returns_empty_list_without_a_request(monkeypatch):
     called = False
 

@@ -24,7 +24,7 @@ from app.rag.llm.base import ChatMessage, LLMProviderTimeoutError, LLMProviderUn
 from app.rag.llm.lmstudio import LMStudioLLMProvider
 
 GEMINI_BASE_URL = "http://fake-gemini.test/v1beta/openai"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.6-flash"
 
 
 def _gemini_configured_provider(monkeypatch, handler, **kwargs) -> LMStudioLLMProvider:
