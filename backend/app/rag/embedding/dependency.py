@@ -10,10 +10,13 @@ use the same construction path.
 
 from app.core.config import settings
 from app.rag.embedding.base import EmbeddingProvider
+from app.rag.embedding.gemini import GeminiEmbeddingProvider
 from app.rag.embedding.lmstudio import LMStudioEmbeddingProvider
 
 
 def get_embedding_provider() -> EmbeddingProvider:
     if settings.EMBEDDING_PROVIDER == "openai_compatible":
         return LMStudioEmbeddingProvider()
+    if settings.EMBEDDING_PROVIDER == "gemini":
+        return GeminiEmbeddingProvider()
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {settings.EMBEDDING_PROVIDER}")
