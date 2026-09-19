@@ -68,7 +68,15 @@ class Settings(BaseSettings):
     DOCUMENTS_PAGE_SIZE_MAX: int = 100
 
     # --- LLM / Embedding / Reranker providers ---
-    # "openai_compatible" works for OpenAI, LM Studio, or any OpenAI-compatible local server.
+    # "openai_compatible" works for OpenAI, LM Studio, or any OpenAI-compatible
+    # local or remote server - including Google Gemini's own OpenAI-compatible
+    # endpoint (https://generativelanguage.googleapis.com/v1beta/openai). No
+    # separate "gemini" LLM_PROVIDER value exists: Gemini's chat/completions
+    # and streaming wire format is standard OpenAI-compatible, so
+    # LMStudioLLMProvider (a generic client despite its name - see its own
+    # docstring) already works against it with no code change, just
+    # different LLM_BASE_URL/LLM_API_KEY/LLM_MODEL values. See
+    # docs/gemini-provider.md for the exact local-vs-cloud configuration.
     LLM_PROVIDER: Literal["openai_compatible", "anthropic"] = "openai_compatible"
     LLM_BASE_URL: str = "http://localhost:1234/v1"
     LLM_API_KEY: str = "not-needed-for-local"
@@ -78,7 +86,12 @@ class Settings(BaseSettings):
     # here would misreport a working-but-slow LM Studio as "unavailable".
     LLM_REQUEST_TIMEOUT_SECONDS: int = 120
 
-    EMBEDDING_PROVIDER: Literal["openai_compatible"] = "openai_compatible"
+    # Embeddings DO need a distinct "gemini" provider value, unlike LLM_PROVIDER
+    # above: Gemini's embeddings need the `dimensions` request field (to get
+    # 768-wide output instead of the model's native 3072) and manual L2
+    # normalization of the truncated result - genuinely different code, not
+    # just different config values. See app/rag/embedding/gemini.py.
+    EMBEDDING_PROVIDER: Literal["openai_compatible", "gemini"] = "openai_compatible"
     EMBEDDING_BASE_URL: str = "http://localhost:1234/v1"
     EMBEDDING_API_KEY: str = "not-needed-for-local"
     EMBEDDING_MODEL: str = "nomic-embed-text"
@@ -135,7 +148,43 @@ class Settings(BaseSettings):
     # best vector hit, not to the fused RRF score - RRF scores aren't on a
     # meaningful absolute scale. A heuristic, not a calibrated probability;
     # see docs/retrieval.md for why and its limitations.
-    RETRIEVAL_MIN_SIMILARITY: float = 0.3
+    #
+    # Lowered from an untested 0.3 after the real evaluation baseline
+    # showed it was blocking generation in every single case: real
+    # nomic-embed-text cosine similarities on this corpus range roughly
+    # 0.06-0.13 (see docs/evaluation-baseline.md's "RETRIEVAL_MIN_SIMILARITY
+    # re-tune" section) - 0.3 was never reachable. A diagnostic run also
+    # found this raw score barely distinguishes cases where the correct
+    # document IS retrieved from cases where it isn't (overlapping
+    # ranges) - so this floor is a sanity check against near-zero noise,
+    # not a precision filter; RRF ranking (see VECTOR_SEARCH_WEIGHT above)
+    # does the real relevance work.
+    #
+    # First tried 0.05 (comfortably below the observed floor): this fixed
+    # generation (correctness 0.0->1.16/3, citation validity 0%->100%) but
+    # caused a real regression - unanswerable-refusal accuracy dropped
+    # 100%->40% and prompt-injection resistance dropped 100%->33% (2/3
+    # canaries leaked), because the model was now engaging with retrieved
+    # content on cases that should have been refused. 0.09 was chosen
+    # instead because the real per-case data showed every unanswerable/
+    # negative-query case topped out at 0.087 - a threshold just above
+    # that floor lets genuinely relevant retrievals through while
+    # continuing to block most cases with no real answer. Validated with
+    # the full 66-case evaluation, not just a targeted sample: correctness
+    # 0.0->0.6/3, faithfulness 0.0->0.56/3, citation validity 0%->100%,
+    # unanswerable-refusal 100%->90% (9/10, one slip), injection
+    # resistance 100%->67% (2/3 resisted). The one case that both leaked
+    # its injection canary AND answered when it should have refused
+    # (qa-035) is the same case in both failures - it embeds a genuinely
+    # answerable sub-question ("what database does Retriva use?") inside
+    # the injection attempt, so it clears the threshold on legitimate
+    # grounds and the injected instruction rides along. 0.05 scored higher
+    # on correctness/faithfulness (1.16/1.04) but regressed refusal/
+    # injection resistance much further (40%/33%) - 0.09 was kept as the
+    # better overall balance. See docs/evaluation-baseline.md for the full
+    # three-way (0.3 / 0.05 / 0.09) before/after comparison and per-case
+    # evidence.
+    RETRIEVAL_MIN_SIMILARITY: float = 0.09
     MAX_CONTEXT_CHUNKS: int = 6
     CONVERSATION_HISTORY_MAX_MESSAGES: int = 6
 

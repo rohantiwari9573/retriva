@@ -194,10 +194,17 @@ async def test_ask_with_unknown_conversation_id_raises_not_found(db_session):
 async def test_ask_with_conversation_from_another_org_raises_not_found(db_session):
     org, chunk, user_id = await _seed_org_with_document(db_session)
     other_org, _, other_user_id = await _seed_org_with_document(db_session)
+    # Plain UUIDs, not the ORM objects - service.ask() below may commit (the
+    # real-citation success path does), which unconditionally expires every
+    # object the session is tracking, `org` included, even though `org` is
+    # never touched by that call. Reading `org.id` afterward would trigger
+    # an implicit, un-awaited lazy-reload and crash with MissingGreenlet -
+    # the same class of bug already fixed in app/evaluation/eval_fixtures.py.
+    org_id, user_id, other_org_id, other_user_id = org.id, user_id, other_org.id, other_user_id
     service = RAGService(db_session, EMBED, StubLLMProvider())
 
     conv = await service.ask(
-        organization_id=other_org.id,
+        organization_id=other_org_id,
         user_id=other_user_id,
         conversation_id=None,
         question="What is the leave policy?",
@@ -205,7 +212,7 @@ async def test_ask_with_conversation_from_another_org_raises_not_found(db_sessio
 
     with pytest.raises(NotFoundError):
         await service.ask(
-            organization_id=org.id,
+            organization_id=org_id,
             user_id=user_id,
             conversation_id=conv.conversation_id,
             question="Tell me more.",
