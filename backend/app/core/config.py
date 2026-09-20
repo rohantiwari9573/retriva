@@ -86,6 +86,21 @@ class Settings(BaseSettings):
     # here would misreport a working-but-slow LM Studio as "unavailable".
     LLM_REQUEST_TIMEOUT_SECONDS: int = 120
 
+    # --- LLM streaming retry ---
+    # Automatic retry is exclusively for transient provider failures (HTTP
+    # 429/503, timeouts, a dropped connection) - never for an auth/bad-
+    # request/malformed-response error, and never for a legitimate
+    # insufficient-evidence answer, which isn't a provider failure at all.
+    # See RAGService._answer_stream_impl's classification.
+    LLM_STREAM_MAX_RETRIES: int = 2  # + the initial attempt = 3 total attempts
+    LLM_STREAM_RETRY_DELAYS_SECONDS: tuple[float, ...] = (2.0, 5.0)
+    # Caps how long a provider's Retry-After header is allowed to make a
+    # single retry wait - without this, a provider reporting a long
+    # Retry-After (e.g. a daily quota reset) would hang the request path
+    # for far longer than a chat request should ever take, rather than
+    # falling through to the existing interrupted/error UI quickly.
+    LLM_STREAM_RETRY_MAX_DELAY_SECONDS: float = 10.0
+
     # Embeddings DO need a distinct "gemini" provider value, unlike LLM_PROVIDER
     # above: Gemini's embeddings need the `dimensions` request field (to get
     # 768-wide output instead of the model's native 3072) and manual L2

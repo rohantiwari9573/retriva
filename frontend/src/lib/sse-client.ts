@@ -19,7 +19,8 @@ export type ChatStreamEvent =
       event: "message_complete";
       data: { message_id: string; answer: string; chunks_considered: number; chunks_used: number };
     }
-  | { event: "error"; data: { code: string; message: string } };
+  | { event: "error"; data: { code: string; message: string } }
+  | { event: "retrying"; data: { attempt: number; max_attempts: number } };
 
 /** Parses one complete "event: ...\ndata: ...\n\n" frame (without the
  * trailing blank line, already split off by the caller). Returns null for

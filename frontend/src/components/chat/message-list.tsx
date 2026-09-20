@@ -72,6 +72,39 @@ export function AssistantThinkingBubble() {
   );
 }
 
+/** Shown between a transient provider failure and the next attempt's
+ * first token (see the `retrying` SSE event / ActiveTurn.retrying) - a
+ * quiet status line, not an error: the request hasn't failed, it's being
+ * automatically retried. `role="status"` + `aria-live="polite"` rather
+ * than `alert`, since this isn't urgent and shouldn't interrupt a screen
+ * reader the way the interrupted/error banner does. */
+export function RetryingIndicator({
+  attempt,
+  maxAttempts,
+}: {
+  attempt: number;
+  maxAttempts: number;
+}) {
+  const isFirstRetry = attempt === 2;
+  return (
+    <div className="flex gap-3">
+      <Avatar role="ASSISTANT" />
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-2 rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground"
+      >
+        <Skeleton className="h-2 w-2 rounded-full" />
+        <span>
+          {isFirstRetry
+            ? "AI service temporarily unavailable. Retrying…"
+            : `Retrying (${attempt - 1}/${maxAttempts - 1})…`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Renders raw, in-progress token text while a turn is streaming - not run
  * through MessageContent's [SOURCE-N] chip parsing, since citations aren't
  * validated (or even fully known) until the stream completes. See

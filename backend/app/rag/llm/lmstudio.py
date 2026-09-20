@@ -41,6 +41,24 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    """Reads a `Retry-After` header as a plain seconds value only - the
+    HTTP-date form exists but every upstream this codebase talks to (LM
+    Studio, Gemini's OpenAI-compatible endpoint) that has been observed to
+    send this header sends a plain integer, and guessing at date parsing
+    for a value never actually seen would be inventing behavior rather
+    than reading it. Returns None (never raises) for a missing or
+    unparseable header - the caller's own bounded default delay covers
+    that case."""
+    value = response.headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return None
+
+
 class LMStudioLLMProvider:
     def __init__(
         self,
@@ -110,7 +128,9 @@ class LMStudioLLMProvider:
                 "llm_request_failed", status_code=exc.response.status_code, base_url=self.base_url
             )
             raise LLMProviderUnavailableError(
-                f"LLM backend returned HTTP {exc.response.status_code}."
+                f"LLM backend returned HTTP {exc.response.status_code}.",
+                status_code=exc.response.status_code,
+                retry_after_seconds=_parse_retry_after(exc.response),
             ) from exc
         except httpx.TimeoutException as exc:
             # Must be caught before the generic httpx.HTTPError below -
@@ -222,7 +242,9 @@ class LMStudioLLMProvider:
                         base_url=self.base_url,
                     )
                     raise LLMProviderUnavailableError(
-                        f"LLM backend returned HTTP {exc.response.status_code}."
+                        f"LLM backend returned HTTP {exc.response.status_code}.",
+                        status_code=exc.response.status_code,
+                        retry_after_seconds=_parse_retry_after(exc.response),
                     ) from exc
 
                 async for line in response.aiter_lines():

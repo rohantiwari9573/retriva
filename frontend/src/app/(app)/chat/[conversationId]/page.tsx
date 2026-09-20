@@ -9,6 +9,7 @@ import {
   InterruptedAssistantBubble,
   MessageList,
   PendingUserBubble,
+  RetryingIndicator,
   StreamingAssistantBubble,
 } from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
@@ -85,7 +86,12 @@ export default function ConversationPage() {
             {isStreamingHere && (
               <div className="mt-4 space-y-4">
                 {!active.isRegenerate && <PendingUserBubble content={active.userMessage} />}
-                {active.tokens ? (
+                {active.retrying ? (
+                  <RetryingIndicator
+                    attempt={active.retrying.attempt}
+                    maxAttempts={active.retrying.maxAttempts}
+                  />
+                ) : active.tokens ? (
                   <StreamingAssistantBubble text={active.tokens} />
                 ) : (
                   <AssistantThinkingBubble />

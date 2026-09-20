@@ -22,7 +22,28 @@ class LLMProviderUnavailableError(Exception):
     unavailable" failure - callers must never silently fall back to a paid
     API. Deliberately distinct from LLMProviderTimeoutError - "refused the
     connection" and "never responded in time" are different failure modes
-    a caller may want to handle differently (e.g. retry timing)."""
+    a caller may want to handle differently (e.g. retry timing).
+
+    `status_code` is the upstream HTTP status when one was actually
+    received (None if the connection never got that far, e.g. DNS/refused)
+    - callers use it to decide whether automatic retry is appropriate
+    (429/503 or no response at all are commonly transient; 400/401/403/404
+    are not, and retrying them wastes an attempt on something that will
+    never succeed). `retry_after_seconds`, when the upstream sent a
+    `Retry-After` header with a plain integer/float seconds value, is the
+    provider's own stated wait time - parsed defensively, never an HTTP-date
+    form, and always still subject to the caller's own maximum delay cap."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 class LLMProviderTimeoutError(Exception):

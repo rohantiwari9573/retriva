@@ -14,6 +14,7 @@ those aren't split further: they're one sequential critical path per
 request, not independently parallelizable work worth separate metrics).
 """
 
+import asyncio
 import contextlib
 import time
 import uuid
@@ -42,6 +43,7 @@ from app.core.metrics import (
     stream_failed_total,
     stream_interrupted_total,
     stream_requests_total,
+    stream_retried_total,
     stream_time_to_first_token_seconds,
 )
 from app.core.telemetry import get_tracer
@@ -67,6 +69,7 @@ from app.rag.streaming_events import (
     ErrorEvent,
     MessageCompleteEvent,
     MessageStartEvent,
+    RetryingEvent,
     StreamEvent,
     TokenEvent,
 )
@@ -77,6 +80,50 @@ logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 _TITLE_MAX_CHARS = 200
+
+
+def _classify_stream_retry(exc: Exception) -> tuple[bool, float | None]:
+    """Decides whether a raised LLM provider exception represents a
+    transient upstream condition worth an automatic retry, and if so, how
+    long the provider itself asked callers to wait.
+
+    Retryable: a timeout (never reached the model, plausibly transient), a
+    mid-stream interruption (dropped connection - see
+    LMStudioLLMProvider._stream_impl, including the closed-without-[DONE]
+    case 31ed851 fixed), and an "unavailable" error whose HTTP status is
+    429/503 or altogether absent (couldn't reach the server at all - a
+    momentary network blip is plausible; a real outage will simply exhaust
+    the retry budget and fall through to the existing error UI).
+
+    Never retryable: LLMProviderResponseError (the backend responded in a
+    shape this code can't use - a fresh attempt against the same model is
+    unlikely to fix that), or an "unavailable" error whose HTTP status is
+    anything else (400/401/403/404/422/...) - those are request/auth/
+    model-configuration problems that retrying cannot fix and that
+    deserve fast, honest failure rather than a delay."""
+    if isinstance(exc, LLMProviderTimeoutError):
+        return True, None
+    if isinstance(exc, LLMProviderStreamInterruptedError):
+        return True, None
+    if isinstance(exc, LLMProviderUnavailableError):
+        if exc.status_code is None or exc.status_code in (429, 503):
+            return True, exc.retry_after_seconds
+        return False, None
+    return False, None
+
+
+def _stream_retry_delay_seconds(attempt_index: int, retry_after_seconds: float | None) -> float:
+    """`attempt_index` is 0 for the delay before the first retry, 1 for the
+    second, etc. A provider-supplied Retry-After is honored but capped -
+    see LLM_STREAM_RETRY_MAX_DELAY_SECONDS's docstring for why an
+    uncapped value must never be allowed to stall a request."""
+    default = (
+        settings.LLM_STREAM_RETRY_DELAYS_SECONDS[attempt_index]
+        if attempt_index < len(settings.LLM_STREAM_RETRY_DELAYS_SECONDS)
+        else settings.LLM_STREAM_RETRY_DELAYS_SECONDS[-1]
+    )
+    delay = retry_after_seconds if retry_after_seconds is not None else default
+    return min(delay, settings.LLM_STREAM_RETRY_MAX_DELAY_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -444,36 +491,69 @@ class RAGService:
             generation_start = time.perf_counter()
             first_token_at: float | None = None
             deltas: list[str] = []
-            try:
-                # contextlib.aclosing(), not a bare `async for`: if a client
-                # disconnects and Starlette tears down this generator via
-                # aclose(), GeneratorExit only unwinds *this* frame - the
-                # inner LLM stream generator isn't implicitly closed by
-                # that, and would otherwise rely on non-deterministic GC to
-                # release its connection. aclosing() guarantees the inner
-                # generator's aclose() runs as part of this frame's own
-                # teardown, so cancellation actually propagates into the
-                # provider (closing its httpx stream) instead of leaking it.
-                with tracer.start_as_current_span("rag.llm_generation") as llm_span:
-                    async with contextlib.aclosing(self.llm.stream(messages)) as token_stream:
-                        async for delta in token_stream:
-                            if first_token_at is None:
-                                first_token_at = time.perf_counter()
-                            deltas.append(delta)
-                            yield TokenEvent(text=delta)
-                    llm_span.set_attribute("llm.streaming", True)
-            except LLMProviderTimeoutError as exc:
-                stream_failed_total.labels(reason="timeout").inc()
-                yield ErrorEvent(code="LLM_TIMEOUT", message=str(exc))
-                return
-            except LLMProviderUnavailableError as exc:
-                stream_failed_total.labels(reason="provider_error").inc()
-                yield ErrorEvent(code="LLM_UNAVAILABLE", message=str(exc))
-                return
-            except (LLMProviderStreamInterruptedError, LLMProviderResponseError) as exc:
-                stream_failed_total.labels(reason="provider_interrupted").inc()
-                yield ErrorEvent(code="LLM_STREAM_INTERRUPTED", message=str(exc))
-                return
+            max_attempts = settings.LLM_STREAM_MAX_RETRIES + 1
+            for attempt in range(1, max_attempts + 1):
+                # Reset per attempt, never accumulated across attempts - a
+                # retry is a fresh generation, not a continuation. Any
+                # TokenEvents already yielded for a failed attempt were
+                # real output at the time, but the RetryingEvent yielded
+                # below tells the frontend to discard them before this
+                # attempt's own TokenEvents start arriving (see
+                # RetryingEvent's docstring) - server-side, `deltas` being
+                # reset here means the eventual persisted answer only ever
+                # reflects the attempt that actually succeeded.
+                first_token_at = None
+                deltas = []
+                try:
+                    # contextlib.aclosing(), not a bare `async for`: if a
+                    # client disconnects and Starlette tears down this
+                    # generator via aclose(), GeneratorExit only unwinds
+                    # *this* frame - the inner LLM stream generator isn't
+                    # implicitly closed by that, and would otherwise rely
+                    # on non-deterministic GC to release its connection.
+                    # aclosing() guarantees the inner generator's aclose()
+                    # runs as part of this frame's own teardown, so
+                    # cancellation actually propagates into the provider
+                    # (closing its httpx stream) instead of leaking it.
+                    with tracer.start_as_current_span("rag.llm_generation") as llm_span:
+                        async with contextlib.aclosing(self.llm.stream(messages)) as token_stream:
+                            async for delta in token_stream:
+                                if first_token_at is None:
+                                    first_token_at = time.perf_counter()
+                                deltas.append(delta)
+                                yield TokenEvent(text=delta)
+                        llm_span.set_attribute("llm.streaming", True)
+                    break  # this attempt succeeded - fall through below
+                except (
+                    LLMProviderTimeoutError,
+                    LLMProviderUnavailableError,
+                    LLMProviderStreamInterruptedError,
+                    LLMProviderResponseError,
+                ) as exc:
+                    if isinstance(exc, LLMProviderTimeoutError):
+                        error_code, reason = "LLM_TIMEOUT", "timeout"
+                    elif isinstance(exc, LLMProviderUnavailableError):
+                        error_code, reason = "LLM_UNAVAILABLE", "provider_error"
+                    else:
+                        error_code, reason = "LLM_STREAM_INTERRUPTED", "provider_interrupted"
+                    is_retryable, retry_after = _classify_stream_retry(exc)
+                    if not is_retryable or attempt == max_attempts:
+                        stream_failed_total.labels(reason=reason).inc()
+                        yield ErrorEvent(code=error_code, message=str(exc))
+                        return
+                    delay = _stream_retry_delay_seconds(attempt - 1, retry_after)
+                    stream_retried_total.labels(reason=reason).inc()
+                    logger.info(
+                        "llm_stream_retry",
+                        conversation_id=str(resolved_conversation_id),
+                        attempt=attempt,
+                        next_attempt=attempt + 1,
+                        max_attempts=max_attempts,
+                        reason=reason,
+                        delay_seconds=delay,
+                    )
+                    yield RetryingEvent(attempt=attempt + 1, max_attempts=max_attempts)
+                    await asyncio.sleep(delay)
             generation_latency_ms = (time.perf_counter() - generation_start) * 1000
             ttft_ms = (
                 (first_token_at - generation_start) * 1000 if first_token_at is not None else None
@@ -488,6 +568,28 @@ class RAGService:
             raw_answer = "".join(deltas)
             with tracer.start_as_current_span("rag.citation_validation"):
                 validated = validate_citations(raw_answer, built_context)
+            # Temporary diagnostic (metadata only - never the raw answer,
+            # document content, or prompt text) to distinguish, for a
+            # completed-but-uncited generation, whether the raw model
+            # output was a normal-length answer that just lacked a
+            # citation versus an unusually short/truncated response - see
+            # the investigation into the production case where a clean,
+            # exception-free stream (real [DONE], no ErrorEvent) still
+            # produced only ~12 tokens before falling through to the
+            # insufficient-evidence answer. request_id is not passed
+            # explicitly - it's already bound into every log line's
+            # context by the request-logging middleware.
+            logger.info(
+                "rag_answer_before_citation_validation",
+                conversation_id=str(resolved_conversation_id),
+                raw_answer_character_length=len(raw_answer),
+                raw_answer_whitespace_token_count=len(raw_answer.split()),
+                raw_answer_has_source_marker="[SOURCE-" in raw_answer,
+                number_of_retrieved_chunks=retrieval.candidates_considered,
+                number_of_validated_citations=len(validated.citations),
+                stream_completed_normally=True,
+                tokens_generated=tokens_generated,
+            )
             if not validated.citations:
                 answer_text = INSUFFICIENT_EVIDENCE_ANSWER
                 citations = []

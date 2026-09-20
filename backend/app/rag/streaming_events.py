@@ -75,13 +75,42 @@ class ErrorEvent:
     message: str
 
 
-StreamEvent = MessageStartEvent | TokenEvent | CitationsEvent | MessageCompleteEvent | ErrorEvent
+@dataclass(frozen=True)
+class RetryingEvent:
+    """Emitted when a transient provider failure (HTTP 429/503, a timeout,
+    or a dropped connection - never an auth/request error or a malformed
+    response) triggers an automatic retry, before the fresh attempt's own
+    TokenEvents start arriving - see RAGService's retry policy.
+
+    Any TokenEvents already emitted for the failed attempt were genuine
+    model output at the time, but each retry is a brand-new generation,
+    never a continuation - the frontend must discard/reset whatever it had
+    accumulated from the failed attempt upon receiving this event, or the
+    next attempt's tokens would silently concatenate onto the discarded
+    ones. `attempt` is 1-indexed and counts the attempt about to start
+    (2 for the first retry, 3 for the second), `max_attempts` is the total
+    including the initial one (fixed at 3 today - see
+    settings.LLM_STREAM_MAX_RETRIES)."""
+
+    attempt: int
+    max_attempts: int
+
+
+StreamEvent = (
+    MessageStartEvent
+    | TokenEvent
+    | CitationsEvent
+    | MessageCompleteEvent
+    | ErrorEvent
+    | RetryingEvent
+)
 
 _EVENT_NAMES: dict[type, str] = {
     MessageStartEvent: "message_start",
     TokenEvent: "token",
     CitationsEvent: "citations",
     MessageCompleteEvent: "message_complete",
+    RetryingEvent: "retrying",
     ErrorEvent: "error",
 }
 

@@ -15,10 +15,20 @@ export type ActiveTurn = {
   /** Raw, unvalidated accumulated model output - see docs/streaming.md's
    * "token events carry unvalidated model output" note. Only used for
    * live rendering while streaming; message_complete's `answer` (reflected
-   * in the refetched conversation once the turn ends) is authoritative. */
+   * in the refetched conversation once the turn ends) is authoritative.
+   * Reset to "" whenever `retrying` becomes non-null (see the `retrying`
+   * SSE event handling below) - a retry is a fresh generation attempt,
+   * never a continuation, so the previous attempt's partial tokens must
+   * not visually concatenate with the next attempt's. */
   tokens: string;
   citations: Citation[] | null;
   isRegenerate: boolean;
+  /** Set on a `retrying` SSE event (a transient provider failure - HTTP
+   * 429/503, a timeout, or a dropped connection - triggered an automatic
+   * retry server-side) and cleared as soon as the next attempt's first
+   * `token` arrives. `attempt`/`maxAttempts` are 1-indexed and match
+   * RAGService's RetryingEvent - see docs/streaming.md. */
+  retrying: { attempt: number; maxAttempts: number } | null;
 };
 
 export type StreamError = {
@@ -101,6 +111,7 @@ export function ChatStreamProvider({
         tokens: "",
         citations: null,
         isRegenerate,
+        retrying: null,
       });
 
       let finalConversationId = knownConversationId;
@@ -119,11 +130,30 @@ export function ChatStreamProvider({
             );
           } else if (evt.event === "token") {
             tokensSoFar += evt.data.text;
-            setActive((prev) => (prev ? { ...prev, tokens: prev.tokens + evt.data.text } : prev));
+            setActive((prev) =>
+              prev
+                ? { ...prev, tokens: prev.tokens + evt.data.text, retrying: null }
+                : prev
+            );
           } else if (evt.event === "citations") {
             setActive((prev) => (prev ? { ...prev, citations: evt.data.citations } : prev));
           } else if (evt.event === "error") {
             sawError = { ...evt.data, conversationId: finalConversationId };
+          } else if (evt.event === "retrying") {
+            // A fresh attempt is about to start - the failed attempt's
+            // partial tokens are discarded here, both from the local
+            // mirror and from the rendered state, so they can never
+            // concatenate with the next attempt's tokens.
+            tokensSoFar = "";
+            setActive((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    tokens: "",
+                    retrying: { attempt: evt.data.attempt, maxAttempts: evt.data.max_attempts },
+                  }
+                : prev
+            );
           }
           // message_complete carries no state this provider needs beyond
           // what citations/message_start already set - the conversation

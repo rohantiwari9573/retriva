@@ -264,3 +264,72 @@ async def test_stream_closes_without_done_and_no_output_raises_unavailable(monke
     with pytest.raises(LLMProviderUnavailableError):
         async for _ in provider.stream([ChatMessage(role="user", content="hi")]):
             pass
+
+
+async def test_stream_http_429_status_attaches_status_code_and_retry_after(monkeypatch):
+    """RAGService's automatic-retry policy (_classify_stream_retry) reads
+    status_code/retry_after_seconds directly off the raised exception -
+    they must be populated from the real response, not left as the
+    default None that would make a 429 indistinguishable from a 400."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429, json={"error": "rate limited"}, headers={"Retry-After": "7"}
+        )
+
+    provider = _patched_provider(monkeypatch, handler)
+    with pytest.raises(LLMProviderUnavailableError) as exc_info:
+        async for _ in provider.stream([ChatMessage(role="user", content="hi")]):
+            pass
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.retry_after_seconds == 7.0
+
+
+async def test_stream_http_503_status_without_retry_after_header(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    provider = _patched_provider(monkeypatch, handler)
+    with pytest.raises(LLMProviderUnavailableError) as exc_info:
+        async for _ in provider.stream([ChatMessage(role="user", content="hi")]):
+            pass
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.retry_after_seconds is None
+
+
+async def test_stream_http_401_status_attaches_status_code(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "unauthorized"})
+
+    provider = _patched_provider(monkeypatch, handler)
+    with pytest.raises(LLMProviderUnavailableError) as exc_info:
+        async for _ in provider.stream([ChatMessage(role="user", content="hi")]):
+            pass
+    assert exc_info.value.status_code == 401
+
+
+async def test_stream_malformed_retry_after_header_is_ignored(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"error": "rate limited"},
+            headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+        )
+
+    provider = _patched_provider(monkeypatch, handler)
+    with pytest.raises(LLMProviderUnavailableError) as exc_info:
+        async for _ in provider.stream([ChatMessage(role="user", content="hi")]):
+            pass
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.retry_after_seconds is None  # HTTP-date form is not parsed
+
+
+async def test_generate_http_status_error_attaches_status_code(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "rate limited"}, headers={"Retry-After": "3"})
+
+    provider = _patched_provider(monkeypatch, handler)
+    with pytest.raises(LLMProviderUnavailableError) as exc_info:
+        await provider.generate([ChatMessage(role="user", content="hi")])
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.retry_after_seconds == 3.0

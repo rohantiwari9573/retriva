@@ -56,6 +56,16 @@ bare text - so the frontend has one parsing path per event type.
 | `citations` | Once, after the full answer is generated and validated | `{citations: [...]}` (same shape as the non-streaming `/chat` response's `citations` field) |
 | `message_complete` | Once, after `citations` | `{message_id, answer, chunks_considered, chunks_used}` |
 | `error` | Any failure after `message_start` was already emitted | `{code, message}` |
+| `retrying` | A transient provider failure (HTTP 429/503, a timeout, or a dropped connection) triggers an automatic retry - see RAGService's retry policy | `{attempt, max_attempts}` |
+
+**A `retrying` event means the fresh attempt's `token` events are a new
+generation, not a continuation.** Any tokens already accumulated from the
+failed attempt must be discarded on receipt of `retrying` - the frontend
+(`use-chat-stream.tsx`) resets its buffer here, otherwise the next
+attempt's tokens would silently concatenate onto the discarded ones. The
+backend enforces the same rule server-side (RAGService resets its own
+`deltas` per attempt), so the eventual `message_complete.answer` only ever
+reflects whichever attempt actually succeeded.
 
 **`token` events carry unvalidated model output.** A `[SOURCE-N]` tag can
 arrive split across multiple `token` events, and may reference a source

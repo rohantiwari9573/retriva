@@ -8,6 +8,7 @@ import {
   AssistantThinkingBubble,
   InterruptedAssistantBubble,
   PendingUserBubble,
+  RetryingIndicator,
   StreamingAssistantBubble,
 } from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
@@ -54,7 +55,12 @@ export default function NewChatPage() {
         {active ? (
           <div className="w-full max-w-2xl space-y-4">
             <PendingUserBubble content={active.userMessage} />
-            {active.tokens ? (
+            {active.retrying ? (
+              <RetryingIndicator
+                attempt={active.retrying.attempt}
+                maxAttempts={active.retrying.maxAttempts}
+              />
+            ) : active.tokens ? (
               <StreamingAssistantBubble text={active.tokens} />
             ) : (
               <AssistantThinkingBubble />

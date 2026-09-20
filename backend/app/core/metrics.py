@@ -207,6 +207,11 @@ stream_interrupted_total = Counter(
     "SSE streams torn down before completion, by reason.",
     ["reason"],
 )
+stream_retried_total = Counter(
+    "stream_retried_total",
+    "Automatic LLM stream retries after a transient provider failure, by reason.",
+    ["reason"],
+)
 
 # --- Storage (MinIO/S3) ---
 storage_requests_total = Counter(

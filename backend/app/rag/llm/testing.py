@@ -90,6 +90,7 @@ class InterruptingLLMProvider:
 
     def __init__(self, *, tokens_before_failure: int = 2) -> None:
         self.tokens_before_failure = tokens_before_failure
+        self.call_count = 0
 
     async def generate(self, messages: list[ChatMessage], *, max_tokens: int | None = None) -> str:
         raise LLMProviderStreamInterruptedError("Stub: connection lost mid-generation.")
@@ -97,10 +98,61 @@ class InterruptingLLMProvider:
     async def stream(
         self, messages: list[ChatMessage], *, max_tokens: int | None = None
     ) -> AsyncGenerator[str, None]:
+        self.call_count += 1
         for i in range(self.tokens_before_failure):
             await asyncio.sleep(0)
             yield f"partial-{i} "
         raise LLMProviderStreamInterruptedError("Stub: connection lost mid-generation.")
+
+
+class FlakyLLMProvider:
+    """Raises a configured sequence of exceptions on successive stream()
+    calls before eventually succeeding - for testing RAGService's
+    automatic-retry policy (app/services/rag_service.py's
+    _classify_stream_retry) without any real network calls.
+
+    Each entry in `failures` is consumed, in order, once per call: a plain
+    Exception raises immediately (nothing streamed for that attempt), or a
+    `(partial_tokens, exception)` tuple streams those tokens first, then
+    raises - for testing that a retry after a partial failed attempt
+    doesn't duplicate that attempt's tokens into the final answer. Once
+    the list is exhausted, stream() succeeds and echoes SOURCE tags like
+    StubLLMProvider (or returns `success_response` verbatim if set)."""
+
+    model = "flaky-test-provider"
+
+    def __init__(
+        self,
+        *,
+        failures: list[Exception | tuple[list[str], Exception]],
+        success_response: str | None = None,
+    ) -> None:
+        self.failures = list(failures)
+        self.success_response = success_response
+        self.call_count = 0
+
+    async def generate(self, messages: list[ChatMessage], *, max_tokens: int | None = None) -> str:
+        raise NotImplementedError("FlakyLLMProvider only implements stream()")
+
+    async def stream(
+        self, messages: list[ChatMessage], *, max_tokens: int | None = None
+    ) -> AsyncGenerator[str, None]:
+        self.call_count += 1
+        if self.failures:
+            entry = self.failures.pop(0)
+            if isinstance(entry, tuple):
+                partial_tokens, exc = entry
+                for token in partial_tokens:
+                    await asyncio.sleep(0)
+                    yield token
+                raise exc
+            await asyncio.sleep(0)
+            raise entry
+        answer = _answer_for(messages, self.success_response)
+        words = answer.split(" ")
+        for i, word in enumerate(words):
+            await asyncio.sleep(0)
+            yield word if i == len(words) - 1 else word + " "
 
 
 class SlowStreamingLLMProvider:
