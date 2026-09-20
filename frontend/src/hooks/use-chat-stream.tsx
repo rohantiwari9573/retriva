@@ -27,13 +27,43 @@ export type StreamError = {
   conversationId: string | null;
 };
 
+/**
+ * A turn that failed mid-stream (provider error, timeout, connection
+ * loss) - distinct from ActiveTurn, which represents a turn still in
+ * flight. Holding this separately from `active` is the fix for the real
+ * production bug this type exists to close: the stream provider (Gemini,
+ * under quota/capacity pressure) can emit several genuine tokens and then
+ * fail - the backend correctly reports this as an `error` SSE event
+ * rather than a normal completion, but the frontend used to unconditionally
+ * discard `active` (including its `tokens`) as soon as *any* stream ended,
+ * whether that end was a real completion or a failure. That silently threw
+ * away partial content and gave the user no indication generation didn't
+ * finish - see docs/streaming.md's ErrorEvent section for the backend side
+ * of this contract.
+ */
+export type InterruptedTurn = {
+  conversationId: string | null;
+  userMessage: string;
+  tokens: string;
+  error: StreamError;
+  isRegenerate: boolean;
+};
+
 type ChatStreamContextValue = {
   active: ActiveTurn | null;
-  error: StreamError | null;
+  /** Every stream failure - network error, provider error, timeout,
+   * interruption - becomes one of these. There is always a turn to show
+   * it against (the user's message that triggered the stream), so this is
+   * rendered inline next to that turn, never as a toast - see
+   * ChatInterruptedBanner. */
+  interrupted: InterruptedTurn | null;
   send: (conversationId: string | null, message: string) => void;
   regenerate: (conversationId: string, lastUserMessage: string) => void;
+  /** Re-sends the interrupted turn's own message via the same path
+   * (send or regenerate) it originally used, then clears it. */
+  retryInterrupted: () => void;
+  dismissInterrupted: () => void;
   stop: () => void;
-  dismissError: () => void;
 };
 
 const ChatStreamContext = createContext<ChatStreamContextValue | null>(null);
@@ -51,7 +81,7 @@ export function ChatStreamProvider({
 }) {
   const queryClient = useQueryClient();
   const [active, setActive] = useState<ActiveTurn | null>(null);
-  const [error, setError] = useState<StreamError | null>(null);
+  const [interrupted, setInterrupted] = useState<InterruptedTurn | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const runStream = useCallback(
@@ -62,7 +92,7 @@ export function ChatStreamProvider({
       isRegenerate: boolean,
       knownConversationId: string | null
     ) => {
-      setError(null);
+      setInterrupted(null);
       const controller = new AbortController();
       abortRef.current = controller;
       setActive({
@@ -74,6 +104,10 @@ export function ChatStreamProvider({
       });
 
       let finalConversationId = knownConversationId;
+      // Mirrors the `active` state the loop below also sets, kept as a
+      // plain local so the partial content is available synchronously in
+      // `finally` without racing React's async state updates.
+      let tokensSoFar = "";
       let sawError: StreamError | null = null;
 
       try {
@@ -84,6 +118,7 @@ export function ChatStreamProvider({
               prev ? { ...prev, conversationId: evt.data.conversation_id } : prev
             );
           } else if (evt.event === "token") {
+            tokensSoFar += evt.data.text;
             setActive((prev) => (prev ? { ...prev, tokens: prev.tokens + evt.data.text } : prev));
           } else if (evt.event === "citations") {
             setActive((prev) => (prev ? { ...prev, citations: evt.data.citations } : prev));
@@ -112,7 +147,19 @@ export function ChatStreamProvider({
         }
         setActive(null);
         abortRef.current = null;
-        if (sawError) setError(sawError);
+        if (sawError) {
+          // Any partial tokens are worth preserving regardless of whether
+          // they're empty - the interrupted-turn banner renders correctly
+          // either way (see ChatInterruptedBanner), and this keeps the
+          // "was anything streamed" decision in one place.
+          setInterrupted({
+            conversationId: finalConversationId,
+            userMessage,
+            tokens: tokensSoFar,
+            error: sawError,
+            isRegenerate,
+          });
+        }
       }
     },
     [organizationId, queryClient]
@@ -144,14 +191,35 @@ export function ChatStreamProvider({
     [organizationId, runStream]
   );
 
+  const retryInterrupted = useCallback(() => {
+    if (!interrupted) return;
+    const { conversationId, userMessage, isRegenerate } = interrupted;
+    setInterrupted(null);
+    if (isRegenerate && conversationId) {
+      regenerate(conversationId, userMessage);
+    } else {
+      send(conversationId, userMessage);
+    }
+  }, [interrupted, regenerate, send]);
+
+  const dismissInterrupted = useCallback(() => setInterrupted(null), []);
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
-  const dismissError = useCallback(() => setError(null), []);
-
   return (
-    <ChatStreamContext.Provider value={{ active, error, send, regenerate, stop, dismissError }}>
+    <ChatStreamContext.Provider
+      value={{
+        active,
+        interrupted,
+        send,
+        regenerate,
+        retryInterrupted,
+        dismissInterrupted,
+        stop,
+      }}
+    >
       {children}
     </ChatStreamContext.Provider>
   );

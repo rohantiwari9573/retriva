@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 
 import {
   AssistantThinkingBubble,
+  InterruptedAssistantBubble,
   PendingUserBubble,
   StreamingAssistantBubble,
 } from "@/components/chat/message-list";
@@ -21,7 +21,7 @@ const EXAMPLE_PROMPTS = [
 
 export default function NewChatPage() {
   const router = useRouter();
-  const { active, error, send, stop, dismissError } = useChatStream();
+  const { active, interrupted, send, retryInterrupted, stop } = useChatStream();
   const [prefill, setPrefill] = useState<{ text: string } | null>(null);
 
   // Redirect to the real conversation URL as soon as message_start resolves
@@ -33,12 +33,16 @@ export default function NewChatPage() {
     }
   }, [active?.conversationId, active?.isRegenerate, router]);
 
+  // Same redirect for a turn that resolved a conversation id and then
+  // failed before this effect above ever fired (a very tight race) -
+  // otherwise the interrupted state below would never be reachable from
+  // here in practice, since [conversationId]/page.tsx is normally already
+  // showing it by the time a stream can fail.
   useEffect(() => {
-    if (error) {
-      toast.error(error.message);
-      dismissError();
+    if (interrupted?.conversationId && !interrupted.isRegenerate) {
+      router.replace(`/chat/${interrupted.conversationId}`);
     }
-  }, [error, dismissError]);
+  }, [interrupted?.conversationId, interrupted?.isRegenerate, router]);
 
   const handleSend = (message: string) => {
     send(null, message);
@@ -55,6 +59,17 @@ export default function NewChatPage() {
             ) : (
               <AssistantThinkingBubble />
             )}
+          </div>
+        ) : interrupted ? (
+          <div className="w-full max-w-2xl space-y-4">
+            {!interrupted.isRegenerate && (
+              <PendingUserBubble content={interrupted.userMessage} />
+            )}
+            <InterruptedAssistantBubble
+              tokens={interrupted.tokens}
+              error={interrupted.error}
+              onRetry={retryInterrupted}
+            />
           </div>
         ) : (
           <div className="w-full max-w-lg text-center">

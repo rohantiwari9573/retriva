@@ -230,3 +230,37 @@ async def test_stream_timeout_after_some_output_raises_interrupted_not_timeout(m
         async for delta in provider.stream([ChatMessage(role="user", content="hi")]):
             deltas.append(delta)
     assert deltas == ["Hello"]
+
+
+async def test_stream_closes_without_done_after_output_raises_interrupted(monkeypatch):
+    # Regression test: this reproduces the real production bug where a
+    # quota/capacity-degraded Gemini connection closed after emitting some
+    # genuine content, but *without* the `data: [DONE]` sentinel and
+    # without raising any httpx exception - aiter_lines() simply stopped
+    # yielding and the async-for ended normally. Before the done_received
+    # tracking was added, this looked exactly like a real, complete answer
+    # to the caller (RAGService), which then fell through to its
+    # insufficient-evidence response - a provider failure silently
+    # misreported as "no relevant documents found".
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = 'data: {"choices":[{"delta":{"content":"Candidate appears to have"}}]}\n\n'
+        return httpx.Response(
+            200, content=body.encode(), headers={"content-type": "text/event-stream"}
+        )
+
+    provider = _patched_provider(monkeypatch, handler)
+    deltas = []
+    with pytest.raises(LLMProviderStreamInterruptedError):
+        async for delta in provider.stream([ChatMessage(role="user", content="hi")]):
+            deltas.append(delta)
+    assert deltas == ["Candidate appears to have"]
+
+
+async def test_stream_closes_without_done_and_no_output_raises_unavailable(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"", headers={"content-type": "text/event-stream"})
+
+    provider = _patched_provider(monkeypatch, handler)
+    with pytest.raises(LLMProviderUnavailableError):
+        async for _ in provider.stream([ChatMessage(role="user", content="hi")]):
+            pass

@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Check, Copy, RotateCcw, User } from "lucide-react";
+import { AlertTriangle, Bot, Check, Copy, RotateCcw, User } from "lucide-react";
 import { toast } from "sonner";
 
 import { CitationPanel } from "@/components/chat/citation-panel";
 import { MessageContent } from "@/components/chat/message-content";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { StreamError } from "@/hooks/use-chat-stream";
+import { getProviderErrorMessage } from "@/lib/format";
 import type { Citation, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +85,68 @@ export function StreamingAssistantBubble({ text }: { text: string }) {
           {text}
           <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-foreground/50 align-text-bottom" />
         </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a turn that failed mid-stream - a real production bug fix, not
+ * a hypothetical: the LLM provider (Gemini, under quota/capacity
+ * pressure) can emit several genuine tokens and then have its connection
+ * close without completing, and the backend correctly reports that as an
+ * ErrorEvent rather than a normal completion (see
+ * app/services/rag_service.py's ask_stream and docs/streaming.md).
+ * Previously the frontend discarded the partial tokens outright and the
+ * conversation refetch that followed would show nothing for the turn,
+ * or - worse, in the closely related case where the stream ended without
+ * raising any error at all - the backend's own legitimate "insufficient
+ * evidence" answer, which looks identical to a real RAG refusal even
+ * though nothing about retrieval failed. This makes the distinction
+ * visible: whatever text streamed in stays on screen, and the failure is
+ * reported as a provider problem, never as "no relevant documents found".
+ */
+export function InterruptedAssistantBubble({
+  tokens,
+  error,
+  onRetry,
+}: {
+  tokens: string;
+  error: StreamError;
+  onRetry: () => void;
+}) {
+  const hasPartialContent = tokens.trim().length > 0;
+  const message = getProviderErrorMessage(error.code);
+
+  return (
+    <div className="flex gap-3">
+      <Avatar role="ASSISTANT" />
+      <div className="flex max-w-2xl flex-col gap-2">
+        {hasPartialContent && (
+          <div className="rounded-lg bg-muted px-4 py-2.5">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{tokens}</p>
+          </div>
+        )}
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="flex-1">
+            {hasPartialContent ? "Response interrupted — " : ""}
+            {message}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onRetry}
+            className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+          >
+            <RotateCcw className="h-3 w-3" aria-hidden="true" />
+            Retry
+          </Button>
+        </div>
       </div>
     </div>
   );

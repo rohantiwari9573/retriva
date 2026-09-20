@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
 import { MessageSquareOff } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { toast } from "sonner";
 
 import {
   AssistantThinkingBubble,
+  InterruptedAssistantBubble,
   MessageList,
   PendingUserBubble,
   StreamingAssistantBubble,
@@ -28,16 +27,10 @@ export default function ConversationPage() {
     organization?.id ?? null,
     conversationId
   );
-  const { active, error, send, regenerate, stop, dismissError } = useChatStream();
-
-  useEffect(() => {
-    if (error) {
-      toast.error(error.message);
-      dismissError();
-    }
-  }, [error, dismissError]);
+  const { active, interrupted, send, regenerate, retryInterrupted, stop } = useChatStream();
 
   const isStreamingHere = active !== null && active.conversationId === conversationId;
+  const isInterruptedHere = interrupted !== null && interrupted.conversationId === conversationId;
   const lastMessage = data?.messages[data.messages.length - 1];
   const canRegenerate = !active && lastMessage?.role === "ASSISTANT";
 
@@ -97,6 +90,23 @@ export default function ConversationPage() {
                 ) : (
                   <AssistantThinkingBubble />
                 )}
+              </div>
+            )}
+            {isInterruptedHere && (
+              // No PendingUserBubble here, unlike the active-streaming
+              // block above: the user's message is always persisted
+              // before generation is attempted (even on failure - see
+              // RAGService.ask_stream), and the conversation refetch
+              // triggered alongside setting `interrupted` means
+              // MessageList will already render it from `data.messages`.
+              // Showing it again here would duplicate it once that
+              // refetch resolves.
+              <div className="mt-4 space-y-4">
+                <InterruptedAssistantBubble
+                  tokens={interrupted.tokens}
+                  error={interrupted.error}
+                  onRetry={retryInterrupted}
+                />
               </div>
             )}
           </div>

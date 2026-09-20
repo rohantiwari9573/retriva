@@ -193,6 +193,21 @@ class LMStudioLLMProvider:
         # and Celery/CLI contexts (a new loop per invocation), so caching a
         # client on the instance would eventually bind it to a dead loop.
         yielded_any = False
+        # Some upstream providers (observed with Gemini's OpenAI-compatible
+        # endpoint under quota/capacity pressure) close the connection after
+        # emitting a handful of legitimate content chunks but *without* ever
+        # sending the `data: [DONE]` sentinel and without the connection
+        # drop itself raising an httpx exception - aiter_lines() just stops
+        # yielding and the async-for below ends normally. Left unchecked,
+        # that silently looks identical to "a real, complete answer that
+        # happens to have no citation", which the caller then treats as a
+        # normal completion (RAGService.ask_stream falls through to the
+        # insufficient-evidence answer) instead of a provider failure -
+        # the exact bug this flag exists to close. Tracking whether [DONE]
+        # was actually seen lets a bare, non-exception-raising early close
+        # be reported as a stream interruption like any other mid-stream
+        # failure, through the same existing exception types.
+        done_received = False
         try:
             async with (
                 httpx.AsyncClient(timeout=self.timeout_seconds) as client,
@@ -215,6 +230,7 @@ class LMStudioLLMProvider:
                         continue  # blank keepalive lines, non-data SSE fields
                     data = line[len("data:") :].strip()
                     if data == "[DONE]":
+                        done_received = True
                         break
                     try:
                         chunk = json.loads(data)
@@ -226,6 +242,19 @@ class LMStudioLLMProvider:
                     if delta:
                         yielded_any = True
                         yield delta
+
+            if not done_received:
+                if yielded_any:
+                    logger.error(
+                        "llm_stream_closed_without_done", base_url=self.base_url
+                    )
+                    raise LLMProviderStreamInterruptedError(
+                        "LLM backend closed the connection before completion."
+                    )
+                logger.error("llm_stream_empty_without_done", base_url=self.base_url)
+                raise LLMProviderUnavailableError(
+                    "LLM backend closed the connection without returning a response."
+                )
         except httpx.TimeoutException as exc:
             # Caught before the generic httpx.HTTPError below - same
             # ordering reason as generate(). A timeout after some tokens
