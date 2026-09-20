@@ -1,9 +1,10 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Eye, EyeOff, FileText, Lock, Mail, Sparkles, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -17,7 +18,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthBrandPanel } from "@/components/marketing/auth-brand-panel";
 import { useLogin } from "@/hooks/use-auth";
 import { ApiError } from "@/lib/api-client";
 
@@ -27,6 +28,24 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+
+const FEATURES = [
+  {
+    icon: FileText,
+    title: "All your knowledge in one place",
+    description: "Documents, searchable and organized.",
+  },
+  {
+    icon: Sparkles,
+    title: "AI-powered answers",
+    description: "Get responses grounded in retrieved knowledge.",
+  },
+  {
+    icon: UsersRound,
+    title: "Built for teams",
+    description: "Secure, multi-tenant workspaces.",
+  },
+];
 
 export default function LoginPage() {
   return (
@@ -40,6 +59,7 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const login = useLogin();
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -57,33 +77,51 @@ function LoginForm() {
   const errorMessage = getLoginErrorMessage(login.error);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
-      {/* CardTitle is a plain styled <div> (see components/ui/card.tsx) -
-          used all over the app for non-page-title purposes (dialogs, stat
-          cards), so it isn't changed globally. This sr-only <h1> gives the
-          page a real landmark-appropriate heading without altering the
-          existing visual design - found missing via axe's
-          page-has-heading-one / landmark-one-main rules. */}
-      <h1 className="sr-only">Sign in to Retriva</h1>
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="text-xl">Sign in to Retriva</CardTitle>
-          <CardDescription>
-            Access your organization&apos;s knowledge base.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+    <main className="flex min-h-screen flex-col bg-[#FAF8F3] lg:flex-row">
+      <AuthBrandPanel
+        eyebrow="SAME KNOWLEDGE. HIGHER IMPACT."
+        heading={
+          <>
+            Your knowledge, <span className="text-[#12A594]">amplified.</span>
+          </>
+        }
+        description="Upload, search, and chat with your organization's knowledge — powered by AI and grounded in your documents."
+        features={FEATURES}
+        footnote="Turn information into progress."
+      />
+
+      <div className="flex flex-1 items-center justify-center px-4 py-16 sm:px-6">
+        <div className="w-full max-w-sm">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-[#0B1220]">
+            Welcome back
+          </h1>
+          <p className="mt-1.5 text-sm text-[#5B6472]">
+            Sign in to your Retriva workspace.
+          </p>
+
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="mt-8 space-y-4">
               <FormField
                 control={form.control}
                 name="email"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input type="email" autoComplete="email" placeholder="you@company.com" {...field} />
-                    </FormControl>
+                    <div className="relative">
+                      <Mail
+                        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[#5B6472]"
+                        aria-hidden="true"
+                      />
+                      <FormControl>
+                        <Input
+                          type="email"
+                          autoComplete="email"
+                          placeholder="you@company.com"
+                          className="h-10 pl-8.5"
+                          {...field}
+                        />
+                      </FormControl>
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -94,9 +132,32 @@ function LoginForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Password</FormLabel>
-                    <FormControl>
-                      <Input type="password" autoComplete="current-password" {...field} />
-                    </FormControl>
+                    <div className="relative">
+                      <Lock
+                        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[#5B6472]"
+                        aria-hidden="true"
+                      />
+                      <FormControl>
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          autoComplete="current-password"
+                          className="h-10 pl-8.5"
+                          {...field}
+                        />
+                      </FormControl>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? "Hide characters" : "Show characters"}
+                        className="absolute top-1/2 right-2.5 -translate-y-1/2 text-[#5B6472] hover:text-[#0B1220]"
+                      >
+                        {showPassword ? (
+                          <EyeOff className="size-4" aria-hidden="true" />
+                        ) : (
+                          <Eye className="size-4" aria-hidden="true" />
+                        )}
+                      </button>
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -106,19 +167,23 @@ function LoginForm() {
                   {errorMessage}
                 </p>
               )}
-              <Button type="submit" className="w-full" disabled={login.isPending}>
+              <Button
+                type="submit"
+                disabled={login.isPending}
+                className="h-10 w-full bg-[#0B1220] text-white hover:bg-[#0B1220]/85"
+              >
                 {login.isPending ? "Signing in..." : "Sign in"}
               </Button>
             </form>
           </Form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
+          <p className="mt-5 text-center text-sm text-[#5B6472]">
             Don&apos;t have an account?{" "}
-            <Link href="/register" className="font-medium text-foreground underline underline-offset-4">
+            <Link href="/register" className="font-medium text-[#0B1220] underline underline-offset-4">
               Create one
             </Link>
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </main>
   );
 }
