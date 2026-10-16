@@ -137,6 +137,10 @@ class Settings(BaseSettings):
     # --- Document processing (Celery) ---
     DOCUMENT_PROCESSING_MAX_RETRIES: int = 3
     DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS: int = 10
+    # "celery" hands documents to a separate worker via the broker. "inline"
+    # runs the same task in a background thread of the API process - for
+    # single-container hosts (e.g. Render's free tier) with no worker service.
+    DOCUMENT_PROCESSING_MODE: Literal["celery", "inline"] = "celery"
 
     # --- Hybrid retrieval (Phase 5) ---
     # Fusion is Reciprocal Rank Fusion (RRF), not a weighted sum of raw scores -

@@ -56,6 +56,11 @@ logger = get_logger(__name__)
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
+# Strong references to in-flight inline processing tasks - the event loop
+# only keeps weak ones, so an unreferenced task can be garbage-collected
+# mid-run.
+_inline_tasks: set[asyncio.Task] = set()
+
 
 class DocumentService:
     def __init__(self, db: AsyncSession, storage: StorageProvider) -> None:
@@ -143,6 +148,17 @@ class DocumentService:
         return document
 
     async def _enqueue_processing(self, document: Document) -> None:
+        if settings.DOCUMENT_PROCESSING_MODE == "inline":
+            # Task.apply() runs the task body locally (same retry/failure
+            # handling as a worker, no broker). It's synchronous and the task
+            # calls asyncio.run() itself, so it gets its own thread - and the
+            # request returns immediately, exactly as with a real worker.
+            task = asyncio.create_task(
+                asyncio.to_thread(process_document.apply, args=[str(document.id)])
+            )
+            _inline_tasks.add(task)
+            task.add_done_callback(_inline_tasks.discard)
+            return
         try:
             await asyncio.to_thread(process_document.delay, str(document.id))
         except Exception as exc:
