@@ -1,3 +1,5 @@
+> **Archived.** Retriva originally ran on a single AWS EC2 instance, as described below. It now runs on Vercel (frontend), Render (API) and Neon (Postgres + object storage); see the [README](../../README.md#deployment). This document is kept as an engineering record.
+
 # AWS Deployment (Phase 11)
 
 Retriva is deployed to a single AWS EC2 instance running the existing
@@ -31,7 +33,7 @@ The `railsphere-cli` IAM user started with almost no permissions beyond
 all. Rather than requesting broad new permissions for services this
 deployment doesn't use, a **least-privilege inline policy**
 (`Phase11-Retriva-EC2-Deploy`, saved at
-`docs/aws-iam-policy-phase11.json`) was added, scoped to exactly:
+`docs/archive/aws-iam-policy-phase11.json`) was added, scoped to exactly:
 EC2 instance/security-group/key-pair/volume lifecycle actions (restricted
 to the `ap-southeast-2` region via a `RequestedRegion` condition), plus
 read-only `freetier:GetFreeTierUsage`, `ce:GetCostAndUsage`, and

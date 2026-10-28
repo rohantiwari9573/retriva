@@ -2,7 +2,7 @@
 # certbot --deploy-hook script: certbot runs this ONLY when a certificate
 # was actually renewed, never on a no-op check - so this doesn't reload
 # nginx on every timer firing, only on the (rare, ~every ~60 days) days a
-# renewal genuinely happened. See docs/aws-deployment.md "HTTPS status" for
+# renewal genuinely happened. See docs/archive/aws-deployment.md "HTTPS status" for
 # the full renewal design and why a deploy-hook (not a fixed post-hook) was
 # chosen.
 #

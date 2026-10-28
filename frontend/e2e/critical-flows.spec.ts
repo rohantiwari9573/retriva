@@ -2,7 +2,7 @@
  * Critical-path E2E test against the LOCAL Docker stack only.
  *
  * ENVIRONMENT: local (http://localhost:3000 / :8000), never the AWS
- * deployment - see playwright.config.ts and docs/aws-deployment.md's
+ * deployment - see playwright.config.ts and docs/archive/aws-deployment.md's
  * explicit local-vs-AWS distinction, which this suite deliberately
  * respects rather than blurring.
  *

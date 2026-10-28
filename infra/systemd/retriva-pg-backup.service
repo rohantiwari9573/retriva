@@ -1,6 +1,6 @@
 [Unit]
 Description=Retriva - encrypted PostgreSQL backup
-Documentation=docs/aws-deployment.md
+Documentation=docs/archive/aws-deployment.md
 Requires=docker.service
 After=docker.service
 

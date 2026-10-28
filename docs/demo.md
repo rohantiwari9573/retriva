@@ -7,7 +7,7 @@ or the AWS deployment (infrastructure/UI only - see the caveat at the end).
 Each step below is IMPLEMENTED and has been VERIFIED LIVE at least once
 during this project's development, either locally (chat/citations/
 streaming) or on the AWS deployment (auth/upload/dashboard/RBAC - see
-`docs/aws-deployment.md`'s smoke-test list for exactly which parts were
+`docs/archive/aws-deployment.md`'s smoke-test list for exactly which parts were
 checked where).
 
 ## 1. Login (~20s)

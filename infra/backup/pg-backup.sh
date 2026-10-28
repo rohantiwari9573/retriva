@@ -2,7 +2,7 @@
 # Retriva PostgreSQL backup - single-instance, encrypted, local (no S3: the
 # IAM credentials for this deployment have no s3:* permission, and the
 # spec's own fallback for exactly that situation is a local encrypted
-# strategy - see docs/aws-deployment.md "PostgreSQL backups").
+# strategy - see docs/archive/aws-deployment.md "PostgreSQL backups").
 #
 # Runs `pg_dump` INSIDE the postgres container (via docker exec), so the
 # database port is never published to the host or network for this -

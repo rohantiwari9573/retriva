@@ -4,7 +4,7 @@
 # By default restores into a SCRATCH database (retriva_restore_test), never
 # directly over the live database - this is deliberate: proving a backup
 # is restorable is the whole point of doing this at all (see
-# docs/aws-deployment.md "PostgreSQL backups" - "backup + restore proof",
+# docs/archive/aws-deployment.md "PostgreSQL backups" - "backup + restore proof",
 # not merely "the backup command exists"), and that proof should never
 # risk the real data it's meant to protect. Pass --target=<db-name> to
 # restore somewhere else, or --target=REPLACE-LIVE-DATABASE to

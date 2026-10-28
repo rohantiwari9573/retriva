@@ -283,7 +283,7 @@ neither manufactured for the sake of having a result:
    container restart** on AWS, causing `/health` and `/readiness` to
    return `502` while `/` still returned `200`. Found live via this
    workstream's own mandated lightweight AWS smoke check, not
-   proactively. Full detail in `docs/aws-deployment.md`'s "Networking /
+   proactively. Full detail in `docs/archive/aws-deployment.md`'s "Networking /
    security groups" section.
 
 ## 12. Fixes Applied

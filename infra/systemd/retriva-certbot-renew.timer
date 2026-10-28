@@ -1,6 +1,6 @@
 [Unit]
 Description=Retriva - daily Let's Encrypt renewal check
-Documentation=docs/aws-deployment.md
+Documentation=docs/archive/aws-deployment.md
 
 [Timer]
 # Certbot's own guidance: check twice daily; a genuine renewal only

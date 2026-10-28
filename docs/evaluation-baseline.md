@@ -32,7 +32,7 @@ numbers reported here).
 - **Do not read CPU latency numbers here as representative of anything
   beyond this specific machine.** They say nothing about GPU inference,
   AWS, or production-scale performance - AWS never runs LM Studio at
-  all (see `docs/aws-deployment.md`).
+  all (see `docs/archive/aws-deployment.md`).
 
 ## Dataset and environment
 
