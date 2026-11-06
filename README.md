@@ -89,14 +89,27 @@ Retrieved document text is confined to delimited context blocks, kept separate f
 
 ## Getting started
 
-**Prerequisites:** Docker Desktop. To run the backend outside Docker you also need Python 3.12+ and Node 22+.
+**Prerequisites:** Docker Desktop.
+
+**Linux/macOS**
 
 ```bash
 git clone https://github.com/rohantiwari9573/retriva.git
 cd retriva
 cp .env.example .env
-docker compose up --build
+docker compose up -d --build
 ```
+
+**Windows PowerShell**
+
+```powershell
+git clone https://github.com/rohantiwari9573/retriva.git
+cd retriva
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+Compose starts Postgres, applies database migrations through a one-shot `migrate` service, then starts the API and worker. `docker compose ps` shows `migrate` as `Exited (0)` once that's done.
 
 | Service | URL |
 |---|---|
@@ -104,26 +117,29 @@ docker compose up --build
 | API + Swagger UI | http://localhost:8000/docs |
 | MinIO console | http://localhost:9001 |
 
-**Choosing a model provider.** By default `.env.example` points at a local [LM Studio](https://lmstudio.ai) server, so you pay nothing for API calls. Load an embedding model (e.g. `nomic-embed-text`) and a chat model (e.g. `qwen2.5-7b-instruct`). To use Google Gemini's free tier instead, uncomment the Gemini block in `.env.example` and add your key. [docs/gemini-provider.md](docs/gemini-provider.md) covers both setups.
+**Choosing a model provider.** You need one for document processing and chat; until then, uploaded documents end up `FAILED`. By default `.env.example` points at a local [LM Studio](https://lmstudio.ai) server, so you pay nothing for API calls. Load an embedding model (e.g. `nomic-embed-text`) and a chat model (e.g. `qwen2.5-7b-instruct`). To use Google Gemini's free tier instead, uncomment the Gemini block in `.env.example` and add your key. [docs/gemini-provider.md](docs/gemini-provider.md) covers both setups.
 
 **Observability stack (optional):**
 
 ```bash
-docker compose --profile observability up --build
+docker compose --profile observability up -d --build
 # Prometheus :9090 · Grafana :3001 · Jaeger :16686
 ```
 
-**Common tasks** are wrapped in the `Makefile`: `make up`, `make test`, `make lint`, `make migrate`.
+**Stopping:** `docker compose down` keeps your data; `docker compose down -v` deletes it.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for details and production, and [ARCHITECTURE.md](ARCHITECTURE.md) for startup order and failure behaviour.
 
 ## Testing
 
 ```bash
-cd backend && pytest            # unit + integration tests against real Postgres/pgvector
 cd frontend && npm test         # Vitest
 cd frontend && npm run test:e2e # Playwright critical flows
 ```
 
-On every push and PR, CI runs Ruff, mypy, the pytest suite against a pgvector Postgres service, ESLint, a production `next build` and both Docker image builds.
+The backend suite needs real Postgres and Redis; [TESTING.md](TESTING.md) has the commands, plus fresh-start and failure checks.
+
+On every push and PR, CI runs Ruff, mypy, the pytest suite against a pgvector Postgres service, ESLint, a production `next build`, both Docker image builds, and a fresh-database start of the stack.
 
 ## Evaluation
 
@@ -181,7 +197,8 @@ docs/            architecture, RAG, retrieval, security, observability, evaluati
 - Members must already have an account to be added to an organization. There are no email invites or password reset, because no mail service is configured.
 - Scanned PDFs without a text layer can't be processed, since there is no OCR.
 - Every member of an organization can see all of its documents. There are no per-document ACLs.
-- Rate limiting uses a fixed window on a single Redis instance.
+- Rate limiting uses a fixed window on a single Redis instance. If Redis is unavailable each API process enforces limits on its own, so they aren't global until Redis returns.
+- Vector search can return fewer results than requested, because of how the IVFFlat index is built. See [ARCHITECTURE.md](ARCHITECTURE.md#known-defects-not-yet-fixed).
 - Some internal identifiers (cookie names, Compose project, Celery app name) still use the project's original working name, `nexus`. Renaming them would invalidate live sessions.
 
 ## License

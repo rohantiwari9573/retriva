@@ -28,7 +28,9 @@ services:
       retries: 10
 
   minio:
-    image: quay.io/minio/minio:latest
+    # MinIO stopped publishing community images. Community fork, pinned by digest:
+    # see "Object storage image" in DEPLOYMENT.md before changing it.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -45,6 +47,25 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot schema migration. Starts only after Postgres is healthy; backend
+  # and worker start only after this exits 0. A failed migration stops the
+  # stack from coming up against the wrong schema.
+  migrate:
+    build:
+      context: ./backend
+      target: runtime
+    command: python -m scripts.migrate
+    restart: "no"
+    env_file: .env
+    environment:
+      OTEL_ENABLED: "false"
+      PROMETHEUS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
   backend:
     build:
       context: ./backend
@@ -56,9 +77,13 @@ services:
     ports:
       - "8000:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       - ./backend:/app
@@ -94,9 +119,13 @@ services:
     expose:
       - "9808"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       - ./backend:/app

@@ -1,0 +1,34 @@
+{
+ "state": {
+  "email": "bench-e1a5bda58e7b@example.com",
+  "organization_id": "24afd731-a533-4d1c-a92c-16eebed25d60"
+ },
+ "ingestion": {
+  "small_4kb": {
+   "documents": 20,
+   "outcomes": {
+    "READY": 20
+   },
+   "chunks_per_document": 3.0,
+   "mean_ms": 110.37,
+   "p50_ms": 94.12,
+   "p95_ms": 105.16,
+   "p99_ms": 407.11,
+   "max_ms": 407.11
+  },
+  "large_400kb": {
+   "documents": 3,
+   "outcomes": {
+    "READY": 3
+   },
+   "chunks_per_document": 207.7,
+   "mean_ms": 588.34,
+   "p50_ms": 537.3,
+   "p95_ms": 708.48,
+   "p99_ms": 708.48,
+   "max_ms": 708.48
+  }
+ },
+ "resources": {},
+ "seconds": 5.210684776306152
+}
