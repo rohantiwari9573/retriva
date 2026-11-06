@@ -41,7 +41,10 @@ def test_recoverable_operations_are_not_flagged(body: str) -> None:
 
 
 def test_drops_in_downgrade_do_not_count() -> None:
-    source = 'def upgrade() -> None:\n    pass\n\ndef downgrade() -> None:\n    op.drop_table("x")\n'
+    source = (
+        "def upgrade() -> None:\n    pass\n\n"
+        'def downgrade() -> None:\n    op.drop_table("x")\n'
+    )
     assert destructive_operations(source) == []
 
 

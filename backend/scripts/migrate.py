@@ -16,13 +16,13 @@ import sys
 import time
 from pathlib import Path
 
-from alembic import command
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
+from alembic import command
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.migrations import (
