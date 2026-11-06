@@ -292,7 +292,8 @@ erDiagram
   even if two workers somehow both process the same document concurrently
   (see [Concurrency](#concurrency-and-idempotency)), this constraint turns a
   silent duplicate into a loud `IntegrityError` instead.
-- An `ivfflat` index on `embedding` with `vector_cosine_ops` supports
+- There's deliberately no vector index: search is exact (see `docs/retrieval.md`).
+  The original `ivfflat` index on `embedding` with `vector_cosine_ops` supported
   approximate nearest-neighbor search for Phase 5's retrieval query.
 - The `CREATE EXTENSION IF NOT EXISTS vector` statement is now part of this
   migration. Previously it was only ever run manually
