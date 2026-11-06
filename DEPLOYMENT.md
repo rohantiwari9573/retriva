@@ -6,10 +6,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how local and production differ.
 
 Needs Docker Desktop. No API keys or paid services are required to start the stack.
 
-> **Known blocker:** `quay.io/minio/minio:latest` can no longer be pulled, because MinIO
-> stopped publishing community images. This only works today if your machine already has
-> that image cached. A replacement image still needs to be chosen.
-
 **Linux/macOS**
 
 ```bash
@@ -33,6 +29,28 @@ docker compose up -d --build
 Compose starts Postgres, runs the `migrate` service to completion, then starts the
 API and worker. Nothing else is needed on a fresh database, and restarting with
 existing data is safe, because `migrate` does nothing when already current.
+
+### Object storage image
+
+Local and self-hosted Compose use `pgsty/minio`, a community fork of MinIO, because MinIO
+stopped publishing community images and `quay.io/minio/minio:latest` can't be pulled on a
+clean machine. The Render deployment doesn't use it.
+
+- **Pinned:** `RELEASE.2026-08-04T00-00-00Z`, by multi-arch digest
+  `sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372`, built from
+  [`d88f46c`](https://github.com/pgsty/silo/commit/d88f46ccee345a9c2fabe2d221d9a9e56bc11aec).
+- **This line has stopped.** It was the last release under that name. The project is now
+  `pgsty/silo`, and newer fixes ship only there. Moving to it needs the same checks as below.
+- **Existing volumes:** the data format is unchanged. A copy of a volume written by MinIO
+  `RELEASE.2025-09-07` read back with identical checksums, and the old image still read the
+  copy afterwards. That copy held only 5 small objects, so copy larger volumes and check
+  them first.
+- **Checked against the app's storage code:** bucket creation, upload, metadata, download,
+  presigned URLs including expiry, deletion, and restarts. Multipart uploads weren't
+  tested, because the app doesn't use them.
+- **Licence:** AGPL-3.0, as with MinIO. Retriva runs the unmodified image as a separate
+  service and doesn't redistribute it. Modifying it and offering it over a network, or
+  shipping the image yourself, brings obligations that you should check against the licence.
 
 ```bash
 docker compose ps                  # migrate shows "Exited (0)"

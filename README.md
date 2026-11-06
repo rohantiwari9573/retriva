@@ -89,7 +89,7 @@ Retrieved document text is confined to delimited context blocks, kept separate f
 
 ## Getting started
 
-**Prerequisites:** Docker Desktop, and currently a cached MinIO image: see the note in [DEPLOYMENT.md](DEPLOYMENT.md#local).
+**Prerequisites:** Docker Desktop.
 
 **Linux/macOS**
 
