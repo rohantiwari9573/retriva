@@ -80,8 +80,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit tests
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      # After the build, which generates the route types tsc needs.
+      - name: Type check
+        run: npx tsc --noEmit
 
   docker-build:
     runs-on: ubuntu-latest
@@ -106,6 +113,12 @@ jobs:
       - name: Create local environment file
         run: cp .env.example .env
 
+      - name: Pull the object storage image from a clean machine
+        run: |
+          docker image ls --digests | grep -i minio && exit 1 || echo "No MinIO image cached"
+          docker compose pull minio
+          docker image ls --digests | grep -i minio
+
       - name: Start the stack on empty volumes
         run: >-
           docker compose -f docker-compose.yml -f docker-compose.isolated.yml
@@ -115,6 +128,16 @@ jobs:
         run: >-
           docker compose -f docker-compose.yml -f docker-compose.isolated.yml
           exec -T backend python -m scripts.smoke_test --base-url http://localhost:8000
+
+      - name: Confirm migration, API and worker state
+        run: |
+          compose="docker compose -f docker-compose.yml -f docker-compose.isolated.yml"
+          $compose ps --all
+          test "$($compose ps --all --format '{{.ExitCode}}' migrate)" = "0"
+          for service in backend worker minio; do
+            container="$($compose ps -q "$service")"
+            test "$(docker inspect -f '{{.State.Health.Status}}' "$container")" = "healthy"
+          done
 
       - name: Show logs on failure
         if: failure()
