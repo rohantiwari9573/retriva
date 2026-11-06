@@ -375,11 +375,9 @@ candidate query alone, matching the defense-in-depth pattern documented in
   dataset and fixture corpus.
 - **Prompt-injection evaluation covers 3 phrasings against 1 local model.**
   It is not, and does not claim to be, proof that injection is solved.
-- **The `ivfflat` vector index is untrained** (documented pre-existing
-  limitation, `docs/retrieval.md`) - vector-only/hybrid results, once a
-  real baseline exists, should be read with that in mind; Postgres
-  generally falls back to a sequential scan at this corpus size anyway
-  (also pre-existing, unchanged by this phase).
+- **Vector results recorded before the index was removed may be understated.**
+  An approximate index silently lost rows once a corpus grew past a small size
+  (see `docs/retrieval.md`). Baselines recorded while it existed need re-running.
 - **Reference-resolution and negative_query categories are deliberately
   adversarial to naive retrieval** - a raw follow-up question or a
   lexically-overlapping-but-unsupported question scoring poorly on
