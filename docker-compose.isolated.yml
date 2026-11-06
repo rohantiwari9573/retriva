@@ -1,0 +1,39 @@
+# Overlay for reproducible local verification and benchmarks. It runs next to
+# a normal `docker compose up` without clashing: use a separate project name.
+#
+#   docker compose -p retriva-verify -f docker-compose.yml -f docker-compose.isolated.yml \
+#     up -d --wait --build backend worker stub-ai
+#
+# No ports are published to the host (run probes inside the network), and real
+# AI providers are replaced by a deterministic stub, so nothing here costs
+# money or needs LM Studio. Not used in production.
+services:
+  postgres:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  minio:
+    ports: !reset []
+  backend:
+    ports: !reset []
+    environment: &isolated_env
+      OTEL_ENABLED: "false"
+      EMBEDDING_BASE_URL: http://stub-ai:9100/v1
+      LLM_BASE_URL: http://stub-ai:9100/v1
+      # Benchmarks raise these so the limiter is not what gets measured.
+      RATE_LIMIT_LOGIN_PER_MINUTE: ${VERIFY_RATE_LIMIT_LOGIN:-5}
+      RATE_LIMIT_REGISTER_PER_MINUTE: ${VERIFY_RATE_LIMIT_REGISTER:-3}
+      RATE_LIMIT_RETRIEVAL_DEBUG_PER_MINUTE: ${VERIFY_RATE_LIMIT_RETRIEVAL:-20}
+      RATE_LIMIT_UPLOAD_PER_MINUTE: ${VERIFY_RATE_LIMIT_UPLOAD:-10}
+  worker:
+    environment: *isolated_env
+  stub-ai:
+    image: python:3.12-slim
+    volumes:
+      - ./backend/scripts/stub_embedding_server.py:/stub.py:ro
+    command: python /stub.py
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:9100/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
