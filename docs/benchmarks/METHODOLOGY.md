@@ -37,9 +37,12 @@ and overwrote results.
 
 - **Results are write-once.** Each run gets a new timestamped directory, and files are
   created exclusively, so nothing can overwrite an existing result.
-- **One run at a time,** enforced by a lock file.
+- **One run at a time,** enforced by a lock file holding the owner's PID. A lock whose
+  owner has exited is replaced.
 - **Memory guard.** Before each measurement it checks free memory and stops below the limit
   (1 GB by default), recording why in `status.json`. A stopped run stays marked incomplete.
+  If something else kills the process, there's no `status.json` at all, which also means
+  incomplete.
 - **Environment recorded.** `environment.json` has the host, Docker version, other running
   containers, and each variant's exact commit.
 
@@ -60,3 +63,23 @@ and overwrote results.
 
 Compare variants only within a run. Differences smaller than the spread between rounds
 aren't evidence of anything.
+
+## Running it
+
+A full run takes about 45 minutes: 3 rounds of 3 variants at about 5 minutes each. It needs
+well over 2 GB of free memory.
+
+```bash
+# One worktree per version, each with its own .env
+git worktree add --detach ../bench/old <old-commit>
+git worktree add --detach ../bench/new <new-commit>
+cp .env.example ../bench/old/.env
+cp .env.example ../bench/new/.env
+
+python backend/scripts/controlled_benchmark.py --out-root docs/benchmarks/controlled \
+  --variant old=../bench/old --variant new=../bench/new --rounds 3
+```
+
+Claude Code stops background processes when memory runs low. To allow a long run from
+there, start it with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`; the runner's own memory
+guard still applies.

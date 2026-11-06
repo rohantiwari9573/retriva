@@ -76,6 +76,36 @@ def free_memory_gb() -> float:
     return int(info["MemAvailable"].split()[0]) / 1024 / 1024
 
 
+def process_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def acquire_lock(lock: Path) -> bool:
+    """A hard kill can't clean up its lock, so one whose owner has exited is replaced."""
+    if lock.exists():
+        owner = lock.read_text().strip()
+        if owner.isdecimal() and process_alive(int(owner)):
+            print(f"Another run holds {lock} (PID {owner}). Not starting.", file=sys.stderr)
+            return False
+        lock.unlink()
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    os.write(fd, str(os.getpid()).encode())
+    os.close(fd)
+    return True
+
+
 def write_once(path: Path, text: str) -> None:
     with open(path, "x", encoding="utf-8") as handle:
         handle.write(text)
@@ -93,6 +123,20 @@ def compose(cwd: Path, *args: str, timeout: int = 900) -> str:
     )
 
 
+def parse_stats(output: str, project: str = PROJECT) -> dict[str, dict[str, float]]:
+    sample = {}
+    for line in output.splitlines():
+        name, cpu, memory = line.split("|")
+        if not name.startswith(f"{project}-"):
+            continue
+        used = memory.split("/")[0].strip()
+        value, unit = float(used[:-3]), used[-3:]
+        megabytes = value * {"KiB": 1 / 1024, "MiB": 1, "GiB": 1024}.get(unit, 1)
+        service = name.removeprefix(f"{project}-").rsplit("-", 1)[0]
+        sample[service] = {"cpu_percent": float(cpu.rstrip("%")), "mem_mb": megabytes}
+    return sample
+
+
 class StatsSampler:
     """Polls docker stats while a measurement runs."""
 
@@ -105,25 +149,17 @@ class StatsSampler:
     def _loop(self) -> None:
         while not self._stop.wait(self.interval):
             try:
+                # docker stats has no --filter, so narrow it down in parse_stats.
                 out = run(
                     [
                         "docker", "stats", "--no-stream",
-                        "--filter", f"name={PROJECT}",
                         "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}",
                     ],
                     timeout=30,
                 )
             except (RuntimeError, subprocess.TimeoutExpired):
                 continue
-            sample = {}
-            for line in out.splitlines():
-                name, cpu, memory = line.split("|")
-                used = memory.split("/")[0].strip()
-                value, unit = float(used[:-3]), used[-3:]
-                megabytes = value * {"KiB": 1 / 1024, "MiB": 1, "GiB": 1024}.get(unit, 1)
-                service = name.removeprefix(f"{PROJECT}-").rsplit("-", 1)[0]
-                sample[service] = {"cpu_percent": float(cpu.rstrip("%")), "mem_mb": megabytes}
-            self.samples.append(sample)
+            self.samples.append(parse_stats(out))
 
     def __enter__(self) -> StatsSampler:
         self._thread.start()
@@ -254,13 +290,8 @@ def main() -> int:
 
     lock = args.out_root / ".controlled_benchmark.lock"
     args.out_root.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        print(f"Another run holds {lock} (PID {lock.read_text()}). Not starting.", file=sys.stderr)
+    if not acquire_lock(lock):
         return 3
-    os.write(fd, str(os.getpid()).encode())
-    os.close(fd)
 
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = args.out_root / f"run-{stamp}"

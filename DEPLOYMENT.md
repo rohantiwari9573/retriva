@@ -6,6 +6,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how local and production differ.
 
 Needs Docker Desktop. No API keys or paid services are required to start the stack.
 
+> **Known blocker:** `quay.io/minio/minio:latest` can no longer be pulled, because MinIO
+> stopped publishing community images. This only works today if your machine already has
+> that image cached. A replacement image still needs to be chosen.
+
 **Linux/macOS**
 
 ```bash
