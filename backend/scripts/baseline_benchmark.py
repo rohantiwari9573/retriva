@@ -7,6 +7,9 @@ latency. See TESTING.md for how to run it.
 
     python -m scripts.baseline_benchmark --base-url http://backend:8000 > out.json
     python -m scripts.baseline_benchmark --base-url http://backend:8000 --login-probe
+
+controlled_benchmark.py drives the separate --seed-and-ingest and --measure steps so
+that cold and warm runs measure the same data.
 """
 
 from __future__ import annotations
@@ -150,6 +153,47 @@ async def measure_redis(url: str, samples: int = 1000) -> dict[str, object]:
     return results
 
 
+async def measure_retrieval_recall(
+    dsn: str, organization_id: str, queries: int = 20, top_k: int = 30
+) -> dict[str, object]:
+    """Vector retrieval as the app queries it, against exact search over the same
+    tenant. top_k matches RETRIEVAL_CANDIDATE_POOL."""
+    connection = await asyncpg.connect(dsn)
+    tenant_filter = (
+        "FROM document_chunks dc JOIN documents d ON d.id = dc.document_id "
+        "WHERE d.organization_id = $1::uuid AND d.status = 'READY'"
+    )
+    search = f"SELECT dc.id {tenant_filter} ORDER BY dc.embedding <=> $2::vector LIMIT $3"
+    exact = (
+        f"WITH tenant AS MATERIALIZED (SELECT dc.id, dc.embedding {tenant_filter}) "
+        "SELECT id FROM tenant ORDER BY embedding <=> $2::vector LIMIT $3"
+    )
+    rng = random.Random(11)
+    counts: list[int] = []
+    recalls: list[float] = []
+    milliseconds: list[float] = []
+    try:
+        for _ in range(queries):
+            vector = "[" + ",".join(f"{rng.uniform(-1, 1):.4f}" for _ in range(768)) + "]"
+            start = time.perf_counter()
+            found = await connection.fetch(search, organization_id, vector, top_k)
+            milliseconds.append((time.perf_counter() - start) * 1000)
+            truth = {row["id"] for row in await connection.fetch(exact, organization_id, vector, top_k)}
+            counts.append(len(found))
+            recalls.append(len({row["id"] for row in found} & truth) / len(truth))
+    finally:
+        await connection.close()
+    return {
+        "queries": queries,
+        "top_k": top_k,
+        "rows_mean": round(statistics.fmean(counts), 2),
+        "rows_min": min(counts),
+        "recall_mean": round(statistics.fmean(recalls), 3),
+        "recall_min": round(min(recalls), 3),
+        **summarize_ms(milliseconds),
+    }
+
+
 def _scan_nodes(node: dict) -> list[str]:
     found = []
     if "Scan" in node["Node Type"]:
@@ -224,11 +268,11 @@ async def register(client: httpx.AsyncClient) -> str:
     return email
 
 
-async def login_probe(base_url: str) -> dict[str, object]:
-    """Status codes only. Run once with Redis up to create BENCH_EMAIL's user
-    (printed), then with Redis stopped and BENCH_EMAIL set."""
+async def login_probe(base_url: str, email: str | None = None) -> dict[str, object]:
+    """Status codes only. Run once with Redis up to create a user (printed), then with
+    Redis stopped, passing that email."""
     async with httpx.AsyncClient(base_url=base_url, timeout=60) as client:
-        email = os.environ.get("BENCH_EMAIL") or await register(client)
+        email = email or os.environ.get("BENCH_EMAIL") or await register(client)
 
         async def attempt(address: str, password: str) -> dict[str, object]:
             start = time.perf_counter()
@@ -250,7 +294,7 @@ async def login_probe(base_url: str) -> dict[str, object]:
         }
 
 
-async def full_run(base_url: str, dsn: str, redis_url: str) -> dict[str, object]:
+async def seed_and_ingest(base_url: str) -> dict[str, object]:
     async with httpx.AsyncClient(base_url=base_url, timeout=120) as client:
         email = await register(client)
         response = await client.post(
@@ -258,49 +302,66 @@ async def full_run(base_url: str, dsn: str, redis_url: str) -> dict[str, object]
         )
         response.raise_for_status()
         organization_id = response.json()["id"]
-        org_url = f"/api/v1/organizations/{organization_id}"
+        ingestion = await measure_ingestion(client, f"/api/v1/organizations/{organization_id}")
+    return {"state": {"email": email, "organization_id": organization_id}, "ingestion": ingestion}
 
-        ingestion = await measure_ingestion(client, org_url)
 
-        credentials = {"email": email, "password": PASSWORD}
-        wrong = {"email": email, "password": "Wrong-Passw0rd!"}
-        async with httpx.AsyncClient(base_url=base_url, timeout=120) as anonymous:
-            latency = [
-                await load("GET /health", 2000, 20, lambda: anonymous.get("/health"), 200),
-                await load("GET /readiness", 500, 10, lambda: anonymous.get("/readiness"), 200),
-                await load(
-                    "POST /auth/login (correct)",
-                    100,
-                    4,
-                    lambda: anonymous.post("/api/v1/auth/login", json=credentials),
-                    200,
+async def measure_requests(
+    base_url: str, dsn: str, redis_url: str, email: str, organization_id: str
+) -> dict[str, object]:
+    org_url = f"/api/v1/organizations/{organization_id}"
+    credentials = {"email": email, "password": PASSWORD}
+    wrong = {"email": email, "password": "Wrong-Passw0rd!"}
+    async with (
+        httpx.AsyncClient(base_url=base_url, timeout=120) as client,
+        httpx.AsyncClient(base_url=base_url, timeout=120) as anonymous,
+    ):
+        response = await client.post("/api/v1/auth/login", json=credentials)
+        response.raise_for_status()
+        latency = [
+            await load("GET /health", 2000, 20, lambda: anonymous.get("/health"), 200),
+            await load("GET /readiness", 500, 10, lambda: anonymous.get("/readiness"), 200),
+            await load(
+                "POST /auth/login (correct)",
+                100,
+                4,
+                lambda: anonymous.post("/api/v1/auth/login", json=credentials),
+                200,
+            ),
+            await load(
+                "POST /auth/login (wrong password)",
+                100,
+                4,
+                lambda: anonymous.post("/api/v1/auth/login", json=wrong),
+                401,
+            ),
+            await load("GET /documents", 500, 10, lambda: client.get(f"{org_url}/documents"), 200),
+            await load(
+                "POST /retrieval/debug (hybrid)",
+                200,
+                4,
+                lambda: client.post(
+                    f"{org_url}/retrieval/debug", json={"query": "database rollback policy"}
                 ),
-                await load(
-                    "POST /auth/login (wrong password)",
-                    100,
-                    4,
-                    lambda: anonymous.post("/api/v1/auth/login", json=wrong),
-                    401,
-                ),
-                await load(
-                    "GET /documents", 500, 10, lambda: client.get(f"{org_url}/documents"), 200
-                ),
-                await load(
-                    "POST /retrieval/debug",
-                    200,
-                    4,
-                    lambda: client.post(
-                        f"{org_url}/retrieval/debug", json={"query": "database rollback policy"}
-                    ),
-                    200,
-                ),
-            ]
-
+                200,
+            ),
+        ]
     return {
-        "ingestion": ingestion,
         "api_latency": latency,
         "redis": await measure_redis(redis_url),
         "database": await measure_queries(dsn, organization_id),
+        "vector_retrieval": await measure_retrieval_recall(dsn, organization_id),
+    }
+
+
+async def full_run(base_url: str, dsn: str, redis_url: str) -> dict[str, object]:
+    seeded = await seed_and_ingest(base_url)
+    state = seeded["state"]
+    return {
+        "ingestion": seeded["ingestion"],
+        **await measure_requests(
+            base_url, dsn, redis_url, state["email"], state["organization_id"]
+        ),
     }
 
 
@@ -308,15 +369,32 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://backend:8000")
     parser.add_argument("--login-probe", action="store_true")
+    parser.add_argument("--email")
+    parser.add_argument("--seed-and-ingest", action="store_true")
+    parser.add_argument("--measure", action="store_true")
+    parser.add_argument("--state", help="JSON from --seed-and-ingest")
+    parser.add_argument("--label")
     args = parser.parse_args()
 
     if args.login_probe:
-        print(json.dumps(asyncio.run(login_probe(args.base_url)), indent=2))
+        print(json.dumps(asyncio.run(login_probe(args.base_url, args.email)), indent=2))
+        return
+    if args.seed_and_ingest:
+        print(json.dumps(asyncio.run(seed_and_ingest(args.base_url)), indent=2))
         return
 
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    result = asyncio.run(full_run(args.base_url, dsn, os.environ["REDIS_URL"]))
-    print(json.dumps(result, indent=2))
+    redis_url = os.environ["REDIS_URL"]
+    if args.measure:
+        state = json.loads(args.state)
+        result = asyncio.run(
+            measure_requests(
+                args.base_url, dsn, redis_url, state["email"], state["organization_id"]
+            )
+        )
+        print(json.dumps({"label": args.label, "state": state, **result}, indent=2))
+        return
+    print(json.dumps(asyncio.run(full_run(args.base_url, dsn, redis_url)), indent=2))
 
 
 if __name__ == "__main__":

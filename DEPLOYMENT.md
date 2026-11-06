@@ -92,6 +92,10 @@ lock needs a real session. Keep the `postgresql+asyncpg://` form the app uses.
 
 4. Merge the PR.
 
+If `alembic_version` isn't what you expect, stop and work out why from the migration
+history. Never edit that table by hand to make the versions match: the schema would
+still be wrong, and the startup check would no longer catch it.
+
 A migration that destroys data is refused with exit code 2. Pass `--allow-destructive`
 only after reviewing it, and only with a current backup.
 
@@ -111,13 +115,24 @@ If it isn't, run the migration steps above first.
 Without this, all website visitors share one login limit and one registration limit,
 because they all reach the API from Vercel's addresses.
 
-1. Generate a secret: `openssl rand -hex 32`.
+1. Generate a secret on your own machine: `openssl rand -hex 32`. Don't paste it into
+   chat, tickets or commits.
 2. Set `EDGE_PROXY_SHARED_SECRET` to that value on **Render** (service `retriva-api`).
-3. Set the same value on **Vercel** (project `retriva`, production environment), then
-   redeploy the frontend. Never prefix it with `NEXT_PUBLIC_`.
+3. Set the same value on **Vercel** (project `retriva`), for the **Production** environment
+   only, then redeploy the frontend. Never prefix it with `NEXT_PUBLIC_`.
 
 The order doesn't matter and nothing breaks in between: until both sides match, the
 API ignores the assertion and behaves as it did before.
+
+| Situation | What happens |
+|---|---|
+| Secret on neither side | Visitors share limits, as they do today |
+| Secret on one side, or values differ | Same, and mismatches count in `client_ip_assertion_rejected_total` |
+| Vercel Preview deployments | Leave the secret unset, so previews can't sign for production |
+| Client sends its own assertion headers | The proxy strips them, and the API rejects any without a valid signature |
+
+**Rotating the secret:** set the new value on both sides. Visitors share limits only
+until both have it.
 
 **Verify after deploying.** From one network, submit a wrong password 6 times on the
 login page, using different email addresses. The 6th should say too many requests.
@@ -136,7 +151,10 @@ enabling it: a wrong setting would let clients choose their own rate-limit ident
 | `EDGE_PROXY_SHARED_SECRET` | API and Vercel | empty (off) | Signs the visitor's IP. At least 32 characters in production |
 | `EDGE_PROXY_MAX_CLOCK_SKEW_SECONDS` | API | 60 | How old a signed IP may be |
 | `TRUSTED_CLIENT_IP_HEADER` | API | empty (off) | Platform header holding the client IP |
-| `RATE_LIMIT_LOGIN_ACCOUNT_PER_MINUTE` | API | 10 | Login attempts per account |
+| `RATE_LIMIT_LOGIN_ACCOUNT_SOFT_FAILURES` | API | 10 | Failed logins per account before responses slow |
+| `RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE` | API | 30 | Failed logins per account before refusal |
+| `RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS` | API | 0.25 | First progressive delay |
+| `RATE_LIMIT_LOGIN_ACCOUNT_DELAY_MAX_SECONDS` | API | 2 | Longest progressive delay |
 | `RATE_LIMIT_REDIS_TIMEOUT_SECONDS` | API | 0.5 | Longest wait per Redis attempt |
 | `RATE_LIMIT_REDIS_RETRY_SECONDS` | API | 5 | How often Redis is retried while down |
 | `RATE_LIMIT_FALLBACK_MAX_KEYS` | API | 10000 | Memory bound of the fallback |

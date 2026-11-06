@@ -81,8 +81,8 @@ whole /64.
 
 | Limit | Identity | Default per minute |
 |---|---|---|
-| Login | Client IP | 5 |
-| Login | Hash of the submitted email | 10 |
+| Login, all attempts | Client IP | 5 |
+| Login, failures only | Hash of the submitted email | Slows from 10, refused at 30 |
 | Register | Client IP | 3 |
 | Refresh | Client IP | 20 |
 | Chat | User | 20 |
@@ -90,9 +90,28 @@ whole /64.
 | Retry, retrieval debug | User | 10, 20 |
 
 Each route has its own counter, so exhausting login doesn't affect registration.
-The per-account limit stops one account being guessed from many addresses. The
-tradeoff is that someone who knows an email can briefly lock its login by
-exhausting it, for up to a minute at a time.
+
+### Guessing versus lockout
+
+An account limit that stops guessing can also be used to deny the real owner. These
+limits are set to make that expensive rather than impossible:
+
+- **One address** stops at 5 attempts a minute, long before it can affect the account.
+- **Only failures count** toward the account, so the owner's own logins never do.
+- **From 10 failures a minute**, responses slow down: 0.25 s, doubling, capped at 2 s.
+- **At 30 failures a minute**, attempts are refused for the rest of the window, including
+  with the correct password. Letting that through would confirm a guess.
+- **Sustaining a lockout takes at least 6 addresses**, up from 3 with the earlier limit.
+  An attacker who has them can still deny login for as long as they keep it up. The
+  real fix for that is a second factor or a known-device exemption, neither of which
+  exists yet.
+- **In exchange, guessing is less limited:** up to 30 guesses a minute per account from
+  rotating addresses, up from 10.
+- **Unknown emails behave identically,** so responses don't reveal which accounts exist.
+- **The check and the count aren't atomic,** so concurrent failures can pass the cap by
+  a few, bounded by the per-IP limit.
+
+There's deliberately no global login limit: anyone could trip it to lock out every user.
 
 ### When Redis is unavailable
 

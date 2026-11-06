@@ -98,6 +98,7 @@ stack ps -a                                    # backend and worker: created, ne
 | Redis down and recovery through the HTTP routes, identities, independent limits | `backend/tests/integration/test_rate_limit_resilience.py` | Real Redis, unreachable-port simulation |
 | Client IP resolution and forged headers | `backend/tests/unit/test_client_ip.py` | Unit |
 | Bounded fallback limiter | `backend/tests/unit/test_rate_limit_fallback.py` | Unit |
+| Lockout, guessing, forged, expired and replayed assertions, secret not logged | `backend/tests/integration/test_login_abuse.py` | Real Redis, HTTP routes |
 | Signature format matches the backend, forged headers stripped | `frontend/src/lib/client-ip-assertion.test.ts` | Unit |
 | Fresh Compose start | `.github/workflows/ci.yml`, job `fresh-start` | Real Compose stack |
 
@@ -113,6 +114,7 @@ only compare runs taken back to back. See [docs/benchmarks/R0.md](docs/benchmark
 
 ```bash
 export VERIFY_RATE_LIMIT_LOGIN=1000000 VERIFY_RATE_LIMIT_LOGIN_ACCOUNT=1000000 \
+  VERIFY_RATE_LIMIT_LOGIN_ACCOUNT_SOFT=1000000 \
   VERIFY_RATE_LIMIT_REGISTER=1000000 VERIFY_RATE_LIMIT_RETRIEVAL=1000000 VERIFY_RATE_LIMIT_UPLOAD=1000000
 stack up -d --wait --build backend worker stub-ai
 stack exec -T backend python -m scripts.baseline_benchmark --base-url http://localhost:8000 > result.json
