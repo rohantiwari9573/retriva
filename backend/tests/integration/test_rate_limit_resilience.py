@@ -286,18 +286,32 @@ async def test_one_account_cannot_be_guessed_from_many_addresses(
 
 
 async def test_chat_limit_is_per_user_not_per_address(client: AsyncClient) -> None:
-    """Chat runs behind login, so one address must not cap everyone behind it."""
-    from app.api.v1 import chat as chat_routes
+    """Two users on one address each get their own budget: website visitors all
+    reached this limit from Vercel's addresses, so it used to be shared."""
 
-    route = next(
-        route
-        for route in chat_routes.router.routes
-        if getattr(route, "path", "").endswith("/chat") and "POST" in route.methods
+    async def exhaust_chat() -> int:
+        client.cookies.clear()
+        await _register(client, credentials := _credentials())
+        await client.post("/api/v1/auth/login", json=credentials)
+        org = await client.post(
+            "/api/v1/organizations", json={"name": f"Org {uuid.uuid4().hex[:8]}"}
+        )
+        url = f"/api/v1/organizations/{org.json()['id']}/chat"
+        status = 0
+        for _ in range(settings.RATE_LIMIT_CHAT_PER_MINUTE + 1):
+            status = (await client.post(url, json={"message": "hello"})).status_code
+        return status
+
+    assert await exhaust_chat() == 429
+    client.cookies.clear()
+    credentials = _credentials()
+    await _register(client, credentials)
+    await client.post("/api/v1/auth/login", json=credentials)
+    org = await client.post("/api/v1/organizations", json={"name": f"Org {uuid.uuid4().hex[:8]}"})
+    response = await client.post(
+        f"/api/v1/organizations/{org.json()['id']}/chat", json={"message": "hello"}
     )
-    assert any(
-        "current_user" in str(dependency.dependency.__code__.co_varnames)
-        for dependency in route.dependencies
-    )
+    assert response.status_code != 429
 
 
 @pytest.fixture(autouse=True)

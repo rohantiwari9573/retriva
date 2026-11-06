@@ -61,7 +61,10 @@ will end up `FAILED` until one is configured.
 Render's free plan has no pre-deploy command, so migrations are a manual step you run
 from your machine. Run them before merging: the old code keeps working during the gap
 as long as migrations stay backward compatible, whereas new code refuses to start on
-an older schema. In that case Render keeps serving the previous deploy.
+an older schema. Render should then keep serving the previous deploy, but that hasn't
+been tested on the free plan, so don't rely on it: confirm the schema before merging.
+
+`--no-deps` matters in these commands: without it, Compose also starts local services.
 
 Use Neon's **direct** connection string, not the `-pooler` one, because the advisory
 lock needs a real session. Keep the `postgresql+asyncpg://` form the app uses.
@@ -69,14 +72,14 @@ lock needs a real session. Keep the `postgresql+asyncpg://` form the app uses.
 1. **Check what would run, changing nothing:**
 
    ```bash
-   docker compose run --rm -e DATABASE_URL="<direct url>" migrate python -m scripts.migrate --check
+   docker compose run --rm --no-deps -e DATABASE_URL="<direct url>" migrate python -m scripts.migrate --check
    ```
 
 2. **Test on a copy.** Create a Neon branch of production (free, and it doesn't touch
    production data), then run against the branch's direct URL:
 
    ```bash
-   docker compose run --rm -e DATABASE_URL="<branch direct url>" migrate
+   docker compose run --rm --no-deps -e DATABASE_URL="<branch direct url>" migrate
    ```
 
    Confirm it exits 0, spot-check the app against the branch, then delete the branch.
@@ -84,7 +87,7 @@ lock needs a real session. Keep the `postgresql+asyncpg://` form the app uses.
 3. **Run on production:**
 
    ```bash
-   docker compose run --rm -e DATABASE_URL="<production direct url>" migrate
+   docker compose run --rm --no-deps -e DATABASE_URL="<production direct url>" migrate
    ```
 
 4. Merge the PR.
