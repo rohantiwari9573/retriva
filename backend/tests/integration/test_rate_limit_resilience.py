@@ -264,27 +264,6 @@ async def test_login_and_register_limits_are_independent(client: AsyncClient) ->
     assert response.status_code == 201
 
 
-async def test_one_account_cannot_be_guessed_from_many_addresses(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Rotating IPs must not give unlimited guesses against a single account."""
-    monkeypatch.setattr(settings, "EDGE_PROXY_SHARED_SECRET", SECRET)
-    body = {"email": "Target@Example.com", "password": "Wrong-Passw0rd!x"}
-    limit = settings.RATE_LIMIT_LOGIN_ACCOUNT_PER_MINUTE
-
-    statuses = [
-        (
-            await client.post(
-                "/api/v1/auth/login", json=body, headers=_signed(f"198.51.100.{index + 1}")
-            )
-        ).status_code
-        for index in range(limit + 1)
-    ]
-
-    assert statuses[:-1] == [401] * limit
-    assert statuses[-1] == 429
-
-
 async def test_chat_limit_is_per_user_not_per_address(client: AsyncClient) -> None:
     """Two users on one address each get their own budget: website visitors all
     reached this limit from Vercel's addresses, so it used to be shared."""

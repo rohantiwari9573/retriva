@@ -10,8 +10,10 @@ counter pattern. Identity strategies:
   only reachable once logged in (chat, upload, retry, retrieval-debug). An IP-keyed
   limit there would let one member exhaust the budget for everyone behind the same
   NAT or proxy, and would let a user dodge the limit by rotating IPs.
-- `enforce_login_account_limit`: keyed by a hash of the submitted email, so guessing
-  one account's password from many addresses still hits a limit.
+- `enforce_login_account_limit` / `record_login_failure`: failed logins keyed by a
+  hash of the submitted email, so guessing one account's password from many addresses
+  slows down and then stops. Only failures count, so the owner's own logins are never
+  what locks them out, and one or a few attacking addresses can't reach the cap.
 
 Redis outage behaviour: a failed Redis call never fails the request. Each process
 switches to its own bounded counters and keeps enforcing the same limits, then
@@ -26,6 +28,7 @@ limiter (no token bucket, no clock skew handling across Redis replicas). That's 
 appropriate tradeoff for this project's scale, not a claim otherwise.
 """
 
+import asyncio
 import hashlib
 import time
 from collections import OrderedDict
@@ -87,6 +90,10 @@ class InMemoryRateLimiter:
         self._windows[key] = (count + 1, expires_at)
         return count + 1
 
+    def peek(self, key: str) -> int:
+        count, expires_at = self._windows.get(key, (0, 0.0))
+        return count if expires_at > self._clock() else 0
+
     def _make_room(self, now: float) -> None:
         if len(self._windows) < self._max_keys:
             return
@@ -140,6 +147,20 @@ async def _redis_increment(key: str, window_seconds: int) -> int:
         await redis.aclose()
 
 
+async def _redis_peek(key: str) -> int:
+    redis: Redis = Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+        socket_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+        retry=Retry(NoBackoff(), 0),
+    )
+    try:
+        return int(await redis.get(key) or 0)
+    finally:
+        await redis.aclose()
+
+
 def _enter_fallback(exc: Exception) -> None:
     global _fallback_is_active, _next_redis_attempt
     redis_errors_total.labels(operation="rate_limit_incr").inc()
@@ -178,6 +199,25 @@ async def _increment(key: str, window_seconds: int) -> int:
         ) from exc
 
 
+async def _peek(key: str) -> int:
+    if time.monotonic() >= _next_redis_attempt:
+        try:
+            count = await _redis_peek(key)
+        except Exception as exc:  # noqa: BLE001 - a Redis failure must never fail the request
+            _enter_fallback(exc)
+        else:
+            _leave_fallback()
+            return count
+
+    try:
+        return _fallback.peek(key)
+    except Exception as exc:
+        logger.error("rate_limit_fallback_failed", exc_info=exc)
+        raise RateLimiterUnavailableError(
+            "This service is temporarily unavailable. Please try again shortly."
+        ) from exc
+
+
 async def _check_and_increment(
     key_prefix: str, key: str, max_requests: int, window_seconds: int
 ) -> None:
@@ -194,15 +234,29 @@ def _resolve_client_ip(request: Request) -> str:
     return resolve_client_ip(request)
 
 
-async def enforce_login_account_limit(email: str) -> None:
+def _login_failures_key(email: str) -> str:
     # Hashed so email addresses aren't stored in Redis or in memory.
     identity = hashlib.sha256(email.strip().lower().encode()).hexdigest()
-    await _check_and_increment(
-        "login_account",
-        f"ratelimit:login:account:{identity}",
-        settings.RATE_LIMIT_LOGIN_ACCOUNT_PER_MINUTE,
-        60,
-    )
+    return f"ratelimit:login:account_failures:{identity}"
+
+
+async def enforce_login_account_limit(email: str) -> None:
+    """Runs before the password is checked, for known and unknown emails alike, so
+    the response never reveals whether an account exists or a guess was right."""
+    failures = await _peek(_login_failures_key(email))
+    if failures >= settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE:
+        rate_limit_rejected_total.labels(endpoint="login_account").inc()
+        raise RateLimitedError(
+            "Too many requests. Please try again later.", code="RATE_LIMITED"
+        )
+    over_soft_limit = failures - settings.RATE_LIMIT_LOGIN_ACCOUNT_SOFT_FAILURES
+    if over_soft_limit >= 0:
+        delay = settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS * 2**over_soft_limit
+        await asyncio.sleep(min(delay, settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_MAX_SECONDS))
+
+
+async def record_login_failure(email: str) -> None:
+    await _increment(_login_failures_key(email), 60)
 
 
 def rate_limit(

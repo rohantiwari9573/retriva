@@ -245,11 +245,16 @@ class Settings(BaseSettings):
     # (for example true-client-ip behind Cloudflare). Empty means never read one.
     TRUSTED_CLIENT_IP_HEADER: str = ""
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
-    # Attempts per account across all addresses: stops guessing one account from
-    # rotating IPs. Deliberately above the per-IP limit so a normal user behind a
-    # shared address isn't affected, but an attacker can still briefly lock out a
-    # known email by exhausting it.
-    RATE_LIMIT_LOGIN_ACCOUNT_PER_MINUTE: int = 10
+    # Failed logins per account across all addresses, which bounds guessing from
+    # rotating IPs. Successful logins don't count. At the soft threshold responses
+    # slow down progressively; at the cap attempts are refused, including with the
+    # correct password, since letting those through would confirm a guess. The cap
+    # is set high because it's also a lockout lever: at 5 per minute per IP, holding
+    # an account at 30 takes at least 6 addresses.
+    RATE_LIMIT_LOGIN_ACCOUNT_SOFT_FAILURES: int = 10
+    RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE: int = 30
+    RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS: float = 0.25
+    RATE_LIMIT_LOGIN_ACCOUNT_DELAY_MAX_SECONDS: float = 2.0
     RATE_LIMIT_REGISTER_PER_MINUTE: int = 3
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 20
     RATE_LIMIT_CHAT_PER_MINUTE: int = 20
