@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.database import get_db, get_session_factory
 from app.core.exceptions import AppError, NotFoundError
 from app.core.logging import get_logger
-from app.core.rate_limit import rate_limit, rate_limit_for_user
+from app.core.rate_limit import rate_limit_for_user
 from app.models.enums import MessageRole, OrgRole
 from app.rag.embedding.base import EmbeddingProvider
 from app.rag.embedding.dependency import get_embedding_provider
@@ -55,7 +55,7 @@ router = APIRouter()
 @router.post(
     "/{organization_id}/chat",
     response_model=ChatResponse,
-    dependencies=[Depends(rate_limit("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
+    dependencies=[Depends(rate_limit_for_user("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
 )
 async def chat(
     body: ChatRequest,
@@ -84,7 +84,7 @@ async def chat(
 
 @router.post(
     "/{organization_id}/chat/stream",
-    dependencies=[Depends(rate_limit("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
+    dependencies=[Depends(rate_limit_for_user("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
 )
 async def chat_stream(
     body: ChatRequest,
@@ -169,7 +169,7 @@ async def chat_stream(
 
 @router.post(
     "/{organization_id}/conversations/{conversation_id}/regenerate",
-    dependencies=[Depends(rate_limit("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
+    dependencies=[Depends(rate_limit_for_user("chat", settings.RATE_LIMIT_CHAT_PER_MINUTE))],
 )
 async def regenerate_chat_stream(
     conversation_id: uuid.UUID,

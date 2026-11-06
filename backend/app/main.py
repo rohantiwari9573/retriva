@@ -14,12 +14,12 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
-from app.core.migrations import assert_schema_is_current
 from app.core.metrics import (
     http_request_duration_seconds,
     http_requests_in_flight,
     http_requests_total,
 )
+from app.core.migrations import assert_schema_is_current
 from app.core.request_id import resolve_request_id
 from app.core.telemetry import (
     init_tracing,
@@ -60,6 +60,11 @@ def _check_production_config() -> None:
             "CORS_ORIGINS must not include '*' in production (combined with "
             "allow_credentials=True this would allow any site to make "
             "authenticated requests on a user's behalf)."
+        )
+    if settings.EDGE_PROXY_SHARED_SECRET and len(settings.EDGE_PROXY_SHARED_SECRET) < 32:
+        raise RuntimeError(
+            "EDGE_PROXY_SHARED_SECRET must be at least 32 characters - a guessable "
+            "value would let clients choose their own rate-limit identity."
         )
 
 

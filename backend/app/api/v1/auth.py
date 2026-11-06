@@ -5,7 +5,7 @@ from app.core.auth_cookies import REFRESH_COOKIE_NAME, clear_auth_cookies, set_a
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.exceptions import UnauthorizedError
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit import enforce_login_account_limit, rate_limit
 from app.schemas.auth import LoginRequest, RegisterRequest, UserPublic
 from app.services.auth_service import AuthService
 
@@ -37,6 +37,7 @@ async def register(
 async def login(
     payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)
 ) -> UserPublic:
+    await enforce_login_account_limit(payload.email)
     service = AuthService(db)
     user, access_token, refresh_token = await service.login(
         email=payload.email, password=payload.password

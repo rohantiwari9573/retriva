@@ -236,13 +236,33 @@ class Settings(BaseSettings):
     # docker-compose.prod.yml specifically so this list can name it - should
     # ever be listed here.
     TRUSTED_PROXY_IPS: list[str] = []
+    # Shared with the frontend's edge proxy, which signs the visitor's IP with
+    # it (see app/core/client_ip.py). Empty disables the feature. Set the same
+    # value on Vercel and on the API, and nowhere a client could read it.
+    EDGE_PROXY_SHARED_SECRET: str = ""
+    EDGE_PROXY_MAX_CLOCK_SKEW_SECONDS: int = 60
+    # Header holding the client IP on platforms whose edge always overwrites it
+    # (for example true-client-ip behind Cloudflare). Empty means never read one.
+    TRUSTED_CLIENT_IP_HEADER: str = ""
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
+    # Attempts per account across all addresses: stops guessing one account from
+    # rotating IPs. Deliberately above the per-IP limit so a normal user behind a
+    # shared address isn't affected, but an attacker can still briefly lock out a
+    # known email by exhausting it.
+    RATE_LIMIT_LOGIN_ACCOUNT_PER_MINUTE: int = 10
     RATE_LIMIT_REGISTER_PER_MINUTE: int = 3
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 20
     RATE_LIMIT_CHAT_PER_MINUTE: int = 20
     RATE_LIMIT_UPLOAD_PER_MINUTE: int = 10
     RATE_LIMIT_RETRY_PER_MINUTE: int = 10
     RATE_LIMIT_RETRIEVAL_DEBUG_PER_MINUTE: int = 20
+    # Redis is the shared store for limits. While it's unreachable each API
+    # process falls back to its own bounded in-memory counters: Redis is retried
+    # at most every RATE_LIMIT_REDIS_RETRY_SECONDS, and each attempt waits at most
+    # RATE_LIMIT_REDIS_TIMEOUT_SECONDS.
+    RATE_LIMIT_REDIS_TIMEOUT_SECONDS: float = 0.5
+    RATE_LIMIT_REDIS_RETRY_SECONDS: float = 5.0
+    RATE_LIMIT_FALLBACK_MAX_KEYS: int = 10_000
 
     # --- Observability (Phase 8) ---
     LOG_LEVEL: str = "INFO"
