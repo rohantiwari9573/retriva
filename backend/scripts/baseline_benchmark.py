@@ -27,11 +27,12 @@ import httpx
 from redis.asyncio import Redis
 
 PASSWORD = "Benchmark-Passw0rd!"
-WORDS = (
-    "deployment incident database retrieval tenant policy rollback schema latency "
-    "worker queue backup index cache replica handbook onboarding security audit "
-    "embedding citation document storage quota migration throughput"
-).split()
+WORDS = [
+    "deployment", "incident", "database", "retrieval", "tenant", "policy", "rollback",
+    "schema", "latency", "worker", "queue", "backup", "index", "cache", "replica",
+    "handbook", "onboarding", "security", "audit", "embedding", "citation", "document",
+    "storage", "quota", "migration", "throughput",
+]
 
 
 def percentile(sorted_values: list[float], fraction: float) -> float:
@@ -152,7 +153,8 @@ async def measure_redis(url: str, samples: int = 1000) -> dict[str, object]:
 def _scan_nodes(node: dict) -> list[str]:
     found = []
     if "Scan" in node["Node Type"]:
-        found.append(f"{node['Node Type']} on {node.get('Index Name') or node.get('Relation Name')}")
+        target = node.get("Index Name") or node.get("Relation Name")
+        found.append(f"{node['Node Type']} on {target}")
     for child in node.get("Plans", []):
         found.extend(_scan_nodes(child))
     return found
@@ -173,7 +175,8 @@ async def measure_queries(dsn: str, organization_id: str, repeats: int = 7) -> d
                 [organization_id],
             ),
             "keyword_search": (
-                "SELECT dc.id, ts_rank(dc.content_tsv, websearch_to_tsquery('english', $2)) AS rank "
+                "SELECT dc.id, "
+                "ts_rank(dc.content_tsv, websearch_to_tsquery('english', $2)) AS rank "
                 "FROM document_chunks dc JOIN documents d ON d.id = dc.document_id "
                 "WHERE d.organization_id = $1::uuid AND d.status = 'READY' "
                 "AND dc.content_tsv @@ websearch_to_tsquery('english', $2) "

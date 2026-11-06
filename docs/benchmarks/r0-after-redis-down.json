@@ -1,0 +1,15 @@
+{
+  "email": "bench-1d2b025ce875@example.com",
+  "correct_password": {
+    "status": 200,
+    "ms": 628.7
+  },
+  "wrong_password": {
+    "status": 401,
+    "ms": 80.6
+  },
+  "unknown_email": {
+    "status": 401,
+    "ms": 72.4
+  }
+}
