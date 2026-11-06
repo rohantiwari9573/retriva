@@ -45,6 +45,25 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot schema migration. Starts only after Postgres is healthy; backend
+  # and worker start only after this exits 0. A failed migration stops the
+  # stack from coming up against the wrong schema.
+  migrate:
+    build:
+      context: ./backend
+      target: runtime
+    command: python -m scripts.migrate
+    restart: "no"
+    env_file: .env
+    environment:
+      OTEL_ENABLED: "false"
+      PROMETHEUS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
   backend:
     build:
       context: ./backend
@@ -56,6 +75,8 @@ services:
     ports:
       - "8000:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -94,6 +115,8 @@ services:
     expose:
       - "9808"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

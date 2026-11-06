@@ -27,6 +27,8 @@ services:
       RATE_LIMIT_UPLOAD_PER_MINUTE: ${VERIFY_RATE_LIMIT_UPLOAD:-10}
   worker:
     environment: *isolated_env
+  frontend:
+    ports: !reset []
   stub-ai:
     image: python:3.12-slim
     volumes:

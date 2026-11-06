@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.migrations import assert_schema_is_current
 from app.core.metrics import (
     http_request_duration_seconds,
     http_requests_in_flight,
@@ -66,6 +67,8 @@ def _check_production_config() -> None:
 async def lifespan(app: FastAPI):
     logger.info("app_startup", environment=settings.ENVIRONMENT)
     _check_production_config()
+    async with AsyncSessionLocal() as session:
+        await assert_schema_is_current(session)
     get_s3_storage_provider().ensure_bucket_exists()
     try:
         async with AsyncSessionLocal() as session:

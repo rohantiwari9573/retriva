@@ -94,3 +94,28 @@ jobs:
 
       - name: Build frontend image
         run: docker build -t nexus-frontend:ci ./frontend
+
+  # Proves the README quickstart: an empty database reaches a working API
+  # through `docker compose` alone, with no manual migration step.
+  fresh-start:
+    runs-on: ubuntu-latest
+    needs: [backend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create local environment file
+        run: cp .env.example .env
+
+      - name: Start the stack on empty volumes
+        run: >-
+          docker compose -f docker-compose.yml -f docker-compose.isolated.yml
+          up -d --wait --wait-timeout 300 --build backend worker stub-ai
+
+      - name: Smoke test
+        run: >-
+          docker compose -f docker-compose.yml -f docker-compose.isolated.yml
+          exec -T backend python -m scripts.smoke_test --base-url http://localhost:8000
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.isolated.yml logs --tail 100
