@@ -108,8 +108,8 @@ limits are set to make that expensive rather than impossible:
 - **In exchange, guessing is less limited:** up to 30 guesses a minute per account from
   rotating addresses, up from 10.
 - **Unknown emails behave identically,** so responses don't reveal which accounts exist.
-- **The check and the count aren't atomic,** so concurrent failures can pass the cap by
-  a few, bounded by the per-IP limit.
+- **Each attempt is counted before the password check** and given back unless it fails,
+  so a concurrent burst can't exceed the cap. While Redis is down this holds per process.
 
 There's deliberately no global login limit: anyone could trip it to lock out every user.
 
@@ -151,4 +151,4 @@ Reproduced and scheduled for later phases.
 | A document can stay in `PROCESSING` after a crash, broker data loss or (from reading the code) a production restart | Reproduced locally except the production case | R1 |
 | Worker crashes don't count as attempts, so redelivery has no limit | Reproduced | R1 |
 | A Postgres transaction stays open during file download and embedding calls | Reproduced | R1 |
-| **Vector search returns fewer rows than requested.** With 683 chunks and one tenant, the normal query plan returned 7 of 20. The IVFFlat index is built on an empty table and scans one list by default. | [docs/benchmarks/R0.md](docs/benchmarks/R0.md) | R4 |
+| **Vector search returns fewer rows than requested.** With 683 chunks and one tenant, the normal query plan returned 7 of 20. | [docs/benchmarks/R0.md](docs/benchmarks/R0.md) | Separate fix, [PR #2](https://github.com/rohantiwari9573/retriva/pull/2) |

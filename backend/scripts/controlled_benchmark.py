@@ -216,7 +216,9 @@ def run_variant(name: str, cwd: Path, run_dir: Path, round_number: int, minimum:
         seed = benchmark(cwd, "--seed-and-ingest")
     write_once(
         run_dir / f"{prefix}-1-ingestion.json",
-        json.dumps({**seed, "resources": sampler.summary(), "seconds": time.time() - started}, indent=1),
+        json.dumps(
+            {**seed, "resources": sampler.summary(), "seconds": time.time() - started}, indent=1
+        ),
     )
     state = json.dumps(seed["state"])
 
@@ -262,7 +264,9 @@ def environment(variants: dict[str, Path]) -> dict:
         "docker": json.loads(
             run(["docker", "info", "--format", "{{json .}}"])
         ).get("ServerVersion"),
-        "docker_vm": run(["docker", "info", "--format", "{{.NCPU}} cpus, {{.MemTotal}} bytes"]).strip(),
+        "docker_vm": run(
+            ["docker", "info", "--format", "{{.NCPU}} cpus, {{.MemTotal}} bytes"]
+        ).strip(),
         "other_containers": run(["docker", "ps", "--format", "{{.Names}}"]).split(),
         "variants": {
             name: run(["git", "rev-parse", "HEAD"], cwd=path).strip()

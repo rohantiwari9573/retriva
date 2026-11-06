@@ -5,11 +5,7 @@ from app.core.auth_cookies import REFRESH_COOKIE_NAME, clear_auth_cookies, set_a
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.exceptions import UnauthorizedError
-from app.core.rate_limit import (
-    enforce_login_account_limit,
-    rate_limit,
-    record_login_failure,
-)
+from app.core.rate_limit import rate_limit, release_login_attempt, reserve_login_attempt
 from app.schemas.auth import LoginRequest, RegisterRequest, UserPublic
 from app.services.auth_service import AuthService
 
@@ -41,16 +37,19 @@ async def register(
 async def login(
     payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)
 ) -> UserPublic:
-    await enforce_login_account_limit(payload.email)
-    service = AuthService(db)
+    await reserve_login_attempt(payload.email)
+    credential_failure = False
     try:
+        service = AuthService(db)
         user, access_token, refresh_token = await service.login(
             email=payload.email, password=payload.password
         )
     except UnauthorizedError as exc:
-        if exc.code == "INVALID_CREDENTIALS":
-            await record_login_failure(payload.email)
+        credential_failure = exc.code == "INVALID_CREDENTIALS"
         raise
+    finally:
+        if not credential_failure:
+            await release_login_attempt(payload.email)
     set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
     return UserPublic.model_validate(user)
 

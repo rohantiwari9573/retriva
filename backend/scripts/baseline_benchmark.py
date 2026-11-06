@@ -178,7 +178,8 @@ async def measure_retrieval_recall(
             start = time.perf_counter()
             found = await connection.fetch(search, organization_id, vector, top_k)
             milliseconds.append((time.perf_counter() - start) * 1000)
-            truth = {row["id"] for row in await connection.fetch(exact, organization_id, vector, top_k)}
+            exact_rows = await connection.fetch(exact, organization_id, vector, top_k)
+            truth = {row["id"] for row in exact_rows}
             counts.append(len(found))
             recalls.append(len({row["id"] for row in found} & truth) / len(truth))
     finally:

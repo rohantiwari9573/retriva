@@ -31,6 +31,18 @@ def test_window_expiry_resets_the_count() -> None:
     assert limiter.hit("a", 60) == 1
 
 
+def test_release_gives_an_attempt_back_and_never_goes_negative() -> None:
+    limiter = InMemoryRateLimiter(max_keys=10, clock=FakeClock())
+    limiter.hit("a", 60)
+    limiter.hit("a", 60)
+
+    limiter.release("a")
+    assert limiter.hit("a", 60) == 2
+
+    limiter.release("unknown")
+    assert limiter.size == 1
+
+
 def test_memory_is_bounded_under_a_key_flood() -> None:
     limiter = InMemoryRateLimiter(max_keys=100, clock=FakeClock())
     for index in range(10_000):

@@ -14,6 +14,7 @@ from httpx import AsyncClient
 from app.core import client_ip, rate_limit
 from app.core.client_ip import SIGNATURE_HEADER, TIMESTAMP_HEADER, VERIFIED_IP_HEADER
 from app.core.config import settings
+from app.core.exceptions import RateLimitedError
 
 PASSWORD = "Str0ng-Passw0rd!x"
 WRONG = "Wrong-Passw0rd!x"
@@ -111,6 +112,72 @@ async def test_correct_password_is_refused_once_the_cap_is_reached(client: Async
         await _login(client, email, WRONG, f"198.51.{index // 250}.{index % 250 + 1}")
 
     assert await _login(client, email, PASSWORD, "203.0.113.5") == 429
+
+
+async def test_a_concurrent_burst_cannot_exceed_the_account_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checking then counting let every request in a burst through: 60 of 60 against a
+    cap of 30. Uses the real limiter and real Redis, with a pause standing in for the
+    password check, because the test client shares one database session."""
+    email = f"burst-{uuid.uuid4().hex[:8]}@example.com"
+
+    async def attempt() -> bool:
+        try:
+            await rate_limit.reserve_login_attempt(email)
+        except RateLimitedError:
+            return False
+        await asyncio.sleep(0.05)
+        return True
+
+    results = await asyncio.gather(*(attempt() for _ in range(60)))
+
+    assert sum(results) == settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE
+
+
+async def test_a_burst_is_also_capped_while_redis_is_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "REDIS_URL", "redis://127.0.0.1:1/15")
+    email = f"burst-{uuid.uuid4().hex[:8]}@example.com"
+
+    async def attempt() -> bool:
+        try:
+            await rate_limit.reserve_login_attempt(email)
+        except RateLimitedError:
+            return False
+        await asyncio.sleep(0.01)
+        return True
+
+    results = await asyncio.gather(*(attempt() for _ in range(60)))
+
+    assert sum(results) == settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE
+
+
+async def test_errors_other_than_bad_credentials_give_the_attempt_back(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A database outage mustn't push real users toward the cap."""
+    from app.services.auth_service import AuthService
+
+    email = await _account(client)
+
+    async def broken(*_: object, **__: object) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(AuthService, "login", broken)
+    limit = settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE
+    for index in range(limit + 1):
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": PASSWORD},
+            headers=_signed(f"198.51.{index // 250}.{index % 250 + 1}"),
+        )
+        assert response.status_code == 500
+    monkeypatch.undo()
+    monkeypatch.setattr(settings, "EDGE_PROXY_SHARED_SECRET", SECRET)
+
+    assert await _login(client, email, PASSWORD, "203.0.113.5") == 200
 
 
 async def test_email_case_cannot_be_used_to_get_a_fresh_budget(client: AsyncClient) -> None:

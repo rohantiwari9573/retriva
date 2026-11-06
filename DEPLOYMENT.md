@@ -105,14 +105,15 @@ only after reviewing it, and only with a current backup.
 
 ### First deploy of the startup schema check
 
-The API now refuses to start if the database is behind the code. Before merging the
-PR that introduces this, confirm production is at head:
+The API now refuses to start if the database is behind the code. Before any merge, check
+production against the code you're about to deploy. This changes nothing:
 
-```sql
-SELECT version_num FROM alembic_version;  -- expected: 6f45bc893ebc
+```bash
+docker compose run --rm --no-deps -e DATABASE_URL="<production direct url>" migrate python -m scripts.migrate --check
 ```
 
-If it isn't, run the migration steps above first.
+Look for `migration_nothing_to_do`. If it reports `migration_pending`, run the migration
+steps above first. Don't rely on a fixed revision: it changes as migrations are added.
 
 ### Client IP behind Vercel
 

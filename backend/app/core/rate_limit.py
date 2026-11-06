@@ -10,10 +10,11 @@ counter pattern. Identity strategies:
   only reachable once logged in (chat, upload, retry, retrieval-debug). An IP-keyed
   limit there would let one member exhaust the budget for everyone behind the same
   NAT or proxy, and would let a user dodge the limit by rotating IPs.
-- `enforce_login_account_limit` / `record_login_failure`: failed logins keyed by a
-  hash of the submitted email, so guessing one account's password from many addresses
-  slows down and then stops. Only failures count, so the owner's own logins are never
-  what locks them out, and one or a few attacking addresses can't reach the cap.
+- `reserve_login_attempt` / `release_login_attempt`: failed logins keyed by a hash of
+  the submitted email, so guessing one account's password from many addresses slows down
+  and then stops. Each attempt is counted before the password check and given back unless
+  it fails, so concurrent guesses can't all slip past the cap and the owner's own logins
+  aren't what locks them out.
 
 Redis outage behaviour: a failed Redis call never fails the request. Each process
 switches to its own bounded counters and keeps enforcing the same limits, then
@@ -64,6 +65,14 @@ if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
 end
 return count
 """
+# Never below zero, and never recreates a counter whose window has already ended.
+_DECREMENT_IF_POSITIVE = """
+local count = tonumber(redis.call('GET', KEYS[1]) or '0')
+if count > 0 then
+  redis.call('DECR', KEYS[1])
+end
+return count
+"""
 
 
 class InMemoryRateLimiter:
@@ -90,9 +99,10 @@ class InMemoryRateLimiter:
         self._windows[key] = (count + 1, expires_at)
         return count + 1
 
-    def peek(self, key: str) -> int:
+    def release(self, key: str) -> None:
         count, expires_at = self._windows.get(key, (0, 0.0))
-        return count if expires_at > self._clock() else 0
+        if count > 0 and expires_at > self._clock():
+            self._windows[key] = (count - 1, expires_at)
 
     def _make_room(self, now: float) -> None:
         if len(self._windows) < self._max_keys:
@@ -147,7 +157,7 @@ async def _redis_increment(key: str, window_seconds: int) -> int:
         await redis.aclose()
 
 
-async def _redis_peek(key: str) -> int:
+async def _redis_release(key: str) -> None:
     redis: Redis = Redis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
@@ -156,7 +166,7 @@ async def _redis_peek(key: str) -> int:
         retry=Retry(NoBackoff(), 0),
     )
     try:
-        return int(await redis.get(key) or 0)
+        await redis.eval(_DECREMENT_IF_POSITIVE, 1, key)  # type: ignore[misc]
     finally:
         await redis.aclose()
 
@@ -199,23 +209,16 @@ async def _increment(key: str, window_seconds: int) -> int:
         ) from exc
 
 
-async def _peek(key: str) -> int:
-    if time.monotonic() >= _next_redis_attempt:
-        try:
-            count = await _redis_peek(key)
-        except Exception as exc:  # noqa: BLE001 - a Redis failure must never fail the request
-            _enter_fallback(exc)
-        else:
-            _leave_fallback()
-            return count
-
+async def _release(key: str) -> None:
+    """Best effort: if this fails, the attempt simply stays counted until the window
+    ends, which errs on the side of limiting."""
     try:
-        return _fallback.peek(key)
-    except Exception as exc:
-        logger.error("rate_limit_fallback_failed", exc_info=exc)
-        raise RateLimiterUnavailableError(
-            "This service is temporarily unavailable. Please try again shortly."
-        ) from exc
+        if time.monotonic() >= _next_redis_attempt:
+            await _redis_release(key)
+        else:
+            _fallback.release(key)
+    except Exception as exc:  # noqa: BLE001 - never fail a login over a refund
+        logger.warning("rate_limit_release_failed", reason=type(exc).__name__)
 
 
 async def _check_and_increment(
@@ -240,23 +243,25 @@ def _login_failures_key(email: str) -> str:
     return f"ratelimit:login:account_failures:{identity}"
 
 
-async def enforce_login_account_limit(email: str) -> None:
-    """Runs before the password is checked, for known and unknown emails alike, so
-    the response never reveals whether an account exists or a guess was right."""
-    failures = await _peek(_login_failures_key(email))
-    if failures >= settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE:
+async def reserve_login_attempt(email: str) -> None:
+    """Counts the attempt atomically before the password is checked, so concurrent
+    guesses can't all pass on the same count. Runs for known and unknown emails alike,
+    so the response never reveals whether an account exists or a guess was right.
+    Anything other than a credential failure gives it back: see release_login_attempt."""
+    attempt = await _increment(_login_failures_key(email), 60)
+    if attempt > settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE:
         rate_limit_rejected_total.labels(endpoint="login_account").inc()
         raise RateLimitedError(
             "Too many requests. Please try again later.", code="RATE_LIMITED"
         )
-    over_soft_limit = failures - settings.RATE_LIMIT_LOGIN_ACCOUNT_SOFT_FAILURES
-    if over_soft_limit >= 0:
-        delay = settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS * 2**over_soft_limit
+    failures_over_soft_limit = attempt - 1 - settings.RATE_LIMIT_LOGIN_ACCOUNT_SOFT_FAILURES
+    if failures_over_soft_limit >= 0:
+        delay = settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS * 2**failures_over_soft_limit
         await asyncio.sleep(min(delay, settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_MAX_SECONDS))
 
 
-async def record_login_failure(email: str) -> None:
-    await _increment(_login_failures_key(email), 60)
+async def release_login_attempt(email: str) -> None:
+    await _release(_login_failures_key(email))
 
 
 def rate_limit(
