@@ -1,0 +1,10 @@
+{
+ "completed": [
+  "round1-old",
+  "round1-r0",
+  "round1-both",
+  "round2-r0",
+  "round2-both"
+ ],
+ "stopped_early": "Written by hand on 2026-11-09: the session running the benchmark ended during round2-old (after its ingestion file). Incomplete; superseded by the next run."
+}
