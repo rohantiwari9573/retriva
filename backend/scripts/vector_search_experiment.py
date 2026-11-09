@@ -1,13 +1,21 @@
-"""Measures how many rows, and which rows, vector search returns per index setup.
+r"""Measures how many rows, and which rows, vector search returns per index setup.
 
-LOCAL only. Creates its own schema through real migrations in the database named by
-DATABASE_URL, and truncates it: never point this at a shared or deployed database.
+DESTRUCTIVE: downgrades the database named by DATABASE_URL to an empty schema,
+migrates it back up and truncates it repeatedly. It refuses to start unless that
+database is positively a local test database (see scripts/local_test_database.py for
+the accepted setups) and you confirm its name. Create one first, for example:
+
+    docker run -d --name vector-experiment-pg -p 127.0.0.1:5432:5432 \
+      -e POSTGRES_USER=nexus -e POSTGRES_PASSWORD=nexus \
+      -e POSTGRES_DB=vector_experiment pgvector/pgvector:pg16
 
 Data and queries are generated from fixed seeds, so results are repeatable apart from
 timings. Ground truth is exact search over the tenant's chunks. The query is the same
 shape as app/rag/retrieval/vector.py.
 
-    python -m scripts.vector_search_experiment --out result.json
+    DATABASE_URL=postgresql+asyncpg://nexus:nexus@localhost:5432/vector_experiment \
+      python -m scripts.vector_search_experiment \
+      --confirm-database vector_experiment --out result.json
 """
 
 from __future__ import annotations
@@ -18,13 +26,16 @@ import math
 import os
 import random
 import statistics
+import sys
 import time
 import uuid
 
 import psycopg
 from alembic.config import Config
+from sqlalchemy.engine import make_url
 
 from alembic import command
+from scripts.local_test_database import LocalTestDatabase, UnsafeTargetError, check_target
 
 DIMENSIONS = 768
 TOP_K = 20
@@ -98,7 +109,13 @@ class Vectors:
         return [value + self.rng.gauss(0, 0.6) for value in center]
 
 
-def migrate() -> None:
+def migrate(target: LocalTestDatabase) -> None:
+    # Alembic connects through the app's settings, not through `target`. Refuse unless
+    # they name the same database, so it can't migrate one that wasn't checked.
+    from app.core.config import settings
+
+    if make_url(settings.DATABASE_URL) != target.url:
+        raise UnsafeTargetError("the app settings name a different database than DATABASE_URL")
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config = Config(os.path.join(root, "alembic.ini"))
     config.set_main_option("script_location", os.path.join(root, "alembic"))
@@ -213,12 +230,24 @@ def measure(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--confirm-database",
+        required=True,
+        help="the name of the database in DATABASE_URL, which this script wipes",
+    )
     args = parser.parse_args()
 
-    dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    migrate()
+    # Before anything connects. The message names the failed check, never the URL.
+    try:
+        target = check_target(
+            os.environ.get("DATABASE_URL"), args.confirm_database, environ=os.environ
+        )
+        migrate(target)
+    except UnsafeTargetError as exc:
+        print(f"Refusing to run: {exc}. See scripts/local_test_database.py.", file=sys.stderr)
+        raise SystemExit(2) from None
     results: dict[str, object] = {"parameters": {"top_k": TOP_K, "queries": QUERIES}}
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    with psycopg.connect(target.libpq_url, autocommit=True) as conn:
         results["pgvector"] = conn.execute(
             "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
         ).fetchone()[0]

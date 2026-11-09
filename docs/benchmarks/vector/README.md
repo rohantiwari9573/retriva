@@ -16,9 +16,12 @@ Synthetic vectors, 20 queries per tenant, recall@20 against exact search of that
 Every setup runs on the same data. The query has the same shape as the app's.
 
 ```bash
-# In the backend image, against a throwaway database. It truncates that database.
-python -m scripts.vector_search_experiment --out result.json
+# Wipes the target database. It refuses to run unless DATABASE_URL is a local host and a
+# database named vector_experiment[_...], confirmed by name: see scripts/local_test_database.py.
+DATABASE_URL=postgresql+asyncpg://nexus:nexus@localhost:5432/vector_experiment   python -m scripts.vector_search_experiment --confirm-database vector_experiment --out result.json
 ```
+
+The runs recorded here used an earlier version without that check.
 
 | Datasets | Tenants |
 |---|---|
