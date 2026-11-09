@@ -61,6 +61,13 @@ def _current_revision(connection: Connection) -> str | None:
     return MigrationContext.configure(connection).get_current_revision()
 
 
+def _is_unknown_revision(current: str | None) -> bool:
+    if current is None:
+        return False
+    script = ScriptDirectory.from_config(alembic_config())
+    return current not in {revision.revision for revision in script.walk_revisions()}
+
+
 def _pending_destructive_operations(current: str | None) -> dict[str, list[str]]:
     script = ScriptDirectory.from_config(alembic_config())
     pending = script.iterate_revisions("heads", current or "base")
@@ -93,6 +100,13 @@ def run(*, allow_destructive: bool, check_only: bool, wait_seconds: float) -> in
 
             if current == head:
                 logger.info("migration_nothing_to_do", revision=head)
+                return EXIT_OK
+
+            # A revision this build doesn't know means the database is newer, as after
+            # rolling the code back. Nothing here can be applied, and the API's startup
+            # check accepts this state too, so it isn't a failure.
+            if _is_unknown_revision(current):
+                logger.warning("migration_database_newer", current=current, target=head)
                 return EXIT_OK
 
             destructive = _pending_destructive_operations(current)

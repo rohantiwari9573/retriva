@@ -53,9 +53,9 @@ def fresh_database() -> Iterator[str]:
             )
 
 
-def _migrate_process(database_url: str, **env: str) -> subprocess.Popen[str]:
+def _migrate_process(database_url: str, *args: str, **env: str) -> subprocess.Popen[str]:
     return subprocess.Popen(
-        [sys.executable, "-m", "scripts.migrate"],
+        [sys.executable, "-m", "scripts.migrate", *args],
         cwd=BACKEND_ROOT,
         env={**os.environ, "DATABASE_URL": database_url, **env},
         stdout=subprocess.PIPE,
@@ -64,8 +64,8 @@ def _migrate_process(database_url: str, **env: str) -> subprocess.Popen[str]:
     )
 
 
-def _run_migrate(database_url: str, **env: str) -> tuple[int, str]:
-    process = _migrate_process(database_url, **env)
+def _run_migrate(database_url: str, *args: str, **env: str) -> tuple[int, str]:
+    process = _migrate_process(database_url, *args, **env)
     output, _ = process.communicate(timeout=120)
     return process.returncode, output
 
@@ -169,11 +169,31 @@ async def test_api_schema_check_accepts_a_migrated_database(fresh_database: str)
     await _check_schema(fresh_database)
 
 
-async def test_api_schema_check_tolerates_a_newer_database(fresh_database: str) -> None:
-    """Rolling the app back after a forward migration must not block boot."""
-    conninfo = _database_url(fresh_database).replace("postgresql+asyncpg://", "postgresql://")
+def _mark_as_newer(database: str) -> None:
+    conninfo = _database_url(database).replace("postgresql+asyncpg://", "postgresql://")
     with psycopg.connect(conninfo, autocommit=True) as connection:
         connection.execute("CREATE TABLE alembic_version (version_num varchar(32) PRIMARY KEY)")
         connection.execute("INSERT INTO alembic_version VALUES ('a_future_revision')")
 
+
+async def test_api_schema_check_tolerates_a_newer_database(fresh_database: str) -> None:
+    """Rolling the app back after a forward migration must not block boot."""
+    _mark_as_newer(fresh_database)
+
     await _check_schema(fresh_database)
+
+
+@pytest.mark.parametrize("args", [(), ("--check",)])
+def test_migrate_tolerates_a_newer_database(fresh_database: str, args: tuple[str, ...]) -> None:
+    """Found against a Neon branch already carrying a later migration: the runner
+    raised on the unknown revision, so the migrate service would have blocked the
+    API even though the API's own check accepts this state."""
+    _mark_as_newer(fresh_database)
+
+    code, output = _run_migrate(_database_url(fresh_database), *args)
+
+    assert code == EXIT_OK, output
+    assert "migration_database_newer" in output
+    assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [
+        ("a_future_revision",)
+    ]
