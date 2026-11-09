@@ -4,13 +4,27 @@ Drops `ix_document_chunks_embedding_cosine`, the IVFFlat index that made vector 
 return too few rows (see `docs/retrieval.md`). The migration deletes no rows, and no
 application code depends on the index, so old and new code both work on either schema.
 
+**Lock timeout.** The migration waits at most 5 seconds for its table lock, in both
+directions. It sets `SET LOCAL lock_timeout = '5s'` inside Alembic's migration
+transaction, immediately before the `DROP INDEX` (or, on downgrade, the
+`CREATE INDEX`), and resets it straight afterwards. No session, role or database
+setting is changed.
+
+If the lock isn't granted in time, Postgres cancels the statement and the whole
+transaction rolls back: the index and `alembic_version` stay exactly as they were, and
+it is safe to retry. This was tested on local Postgres 16, against a second connection
+holding a conflicting lock (`tests/integration/test_vector_index_migration.py`). It
+hasn't been run on Neon. `SET LOCAL lock_timeout` is standard Postgres, available in
+every supported version including Neon's 18.
+
 You run every step yourself. Credentials are typed into hidden prompts, never on a
 command line, and nothing below prints them. Stop at the first unexpected result.
 
 **Validated beforehand:** upgrade, downgrade and re-upgrade on the Neon branch
 `retriva-vector-validation`, a copy of production. Row counts stayed identical and
 search results stayed correct and isolated per tenant. See
-`docs/benchmarks/vector/README.md`.
+`docs/benchmarks/vector/README.md`. That run used the migration from before the lock
+timeout was added, which differs only by the `SET LOCAL` lines.
 
 ## 0. Preconditions
 
@@ -96,42 +110,58 @@ your plan, so check it in the console.
 
 ## 4. Migrate
 
-**Terminal B (watcher).** Open a second Git Bash and repeat step 1's `read`/`export`/`q`
-lines. Then run the following repeatedly while the migration runs:
-
-```bash
-q "SELECT pid, now() - query_start AS waiting, left(query, 50) AS query, pg_blocking_pids(pid) AS blocked_by
-   FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock';"
-```
-
-**Terminal A**, from your main checkout:
+From your main checkout:
 
 ```bash
 cd ~/Desktop/Retriva
 git switch master && git pull --ff-only
 git log -1 --oneline                                   # PR #2's merge
 ls backend/alembic/versions | grep b4f2c81d9e37        # must print the migration file
+grep -c "SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'" backend/alembic/versions/b4f2c81d9e37_*.py
 docker compose run --rm --no-deps -e DATABASE_URL backend alembic current
 docker compose run --rm --no-deps -e DATABASE_URL backend alembic upgrade head
 ```
 
 `-e DATABASE_URL` passes the exported variable by name, so its value appears
-nowhere. Expect `alembic current` to print `6f45bc893ebc`. Expect the upgrade to log
-`Running upgrade 6f45bc893ebc -> b4f2c81d9e37` and finish within seconds.
+nowhere. Expect:
+- the `grep -c` to print `1`
+- `alembic current` to print `6f45bc893ebc`
+- the upgrade to log `Running upgrade 6f45bc893ebc -> b4f2c81d9e37` and finish within
+  seconds
+
+**If the lock times out**, the upgrade exits non-zero within about 5 to 10 seconds,
+ending with:
+
+```
+sqlalchemy.exc.OperationalError: (psycopg.errors.LockNotAvailable) canceling statement due to lock timeout
+```
+
+To retry safely:
+1. Run step 2's version and index queries. Expect `6f45bc893ebc`, with
+   `ix_document_chunks_embedding_cosine` still present. If they show anything else,
+   **stop**.
+2. Find what held the lock, then let it finish. Don't cancel ingestion or other work:
+
+   ```bash
+   q "SELECT pid, state, now() - xact_start AS xact_age, left(query, 50) AS query FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid() AND xact_start IS NOT NULL;"
+   ```
+
+3. Once no transaction is older than about 30 s, run the `upgrade` again.
+4. After three timeouts, **stop** and investigate what keeps holding the table.
 
 **Stop if:**
+- **The `grep -c` prints `0`.** The checkout doesn't contain the timeout. Never run
+  `upgrade` from it.
 - **`alembic current` prints anything other than `6f45bc893ebc`.** If it shows a local
   revision or errors, `DATABASE_URL` didn't reach the container. Never run `upgrade`
   in that state.
-- **The upgrade is waiting on a lock in terminal B for more than 10 s.** Cancel it with
-  `q "SELECT pg_cancel_backend(<pid>);"`, using the pid of the `DROP INDEX`. Alembic
-  runs the migration in one transaction, so cancelling rolls it back and the version
-  stays `6f45bc893ebc`. Find out what `blocked_by` was before you retry.
-- **Any error.** Postgres DDL is transactional, so a failed upgrade leaves the version
-  and the index unchanged. Confirm that with step 2's version and index queries.
-
-A note on `lock_timeout`: setting it with `PGOPTIONS` might work, but whether Neon
-passes it through hasn't been tested, so this runbook relies on the watcher instead.
+- **The upgrade hangs for more than 30 s** without timing out, which shouldn't happen.
+  Find its pid with the `pg_stat_activity` query above, then cancel it with
+  `q "SELECT pg_cancel_backend(<pid>);"`. The transaction rolls back. Check step 2's
+  version and index queries and don't retry.
+- **Any other error.** Postgres DDL is transactional, so a failed upgrade leaves the
+  version and the index unchanged. Confirm that with step 2's version and index queries.
 
 ## 5. Post-checks
 
@@ -197,7 +227,7 @@ unset PGURL DATABASE_URL BACKUP_URL; unset -f q qb
 | What | How | Limits |
 |---|---|---|
 | Code | Revert PR #2 on `master` | Never needs a schema change: old code works on the new schema |
-| Schema | `docker compose run --rm --no-deps -e DATABASE_URL backend alembic downgrade 6f45bc893ebc` | **Recreates the defective index**, so the missing-rows bug returns. `CREATE INDEX` blocks writes to `document_chunks` while it builds: seconds at today's size, longer and memory-hungry on a large table |
+| Schema | `docker compose run --rm --no-deps -e DATABASE_URL backend alembic downgrade 6f45bc893ebc` | **Recreates the defective index**, so the missing-rows bug returns. `CREATE INDEX` blocks writes to `document_chunks` while it builds: seconds at today's size, longer and memory-hungry on a large table. It also gives up after 5 s if a writer holds the table, with the same error and retry steps as the upgrade; the version stays `b4f2c81d9e37` |
 | Schema, after PR #1 is merged | Don't downgrade on its own | R0's API refuses to start on a known older revision. You would have to roll back the code first |
 | Data | Restore from `backup-before-vector-migration` | Only if data was damaged, which this migration cannot do. A restore loses everything written after the backup |
 
@@ -207,8 +237,10 @@ unset PGURL DATABASE_URL BACKUP_URL; unset -f q qb
   `document_chunks` for milliseconds. If Neon's compute is asleep, waking it adds a few
   seconds to the first command.
 - **Locking risk.** The lock waits behind any open transaction on the table, for
-  example ingestion, which holds a long transaction. While it waits, new searches queue
-  behind it. That is why step 2 checks for open transactions and step 4 has a watcher.
+  example ingestion, which holds a long transaction, and new searches queue behind it.
+  The migration's 5-second timeout caps that: at worst, searches stall for about 5
+  seconds and the migration fails cleanly, to be retried. Step 2's check for open
+  transactions makes that unlikely.
 - **Query cost.** Production holds about 3 chunks, where Postgres already scans the
   table, so nothing changes today.
   - Exact search costs grow with each tenant's ready chunks, not with the whole table:
