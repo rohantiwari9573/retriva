@@ -1,0 +1,450 @@
+{
+ "chunks": 683,
+ "ivfflat_indexes": 1,
+ "threshold": 0.09,
+ "embedding_model": "text-embedding-nomic-embed-text-v1.5",
+ "plan": "Limit  (cost=12.22..56.99 rows=20 width=24)\n  InitPlan 1 (returns $0)\n    ->  Limit  (cost=0.00..0.13 rows=1 width=18)\n          ->  Seq Scan on document_chunks  (cost=0.00..86.83 rows=683 width=18)\n  ->  Nested Loop  (cost=12.09..1540.98 rows=683 width=24)\n        ->  Index Scan using ix_document_chunks_embedding_cosine on document_chunks dc  (cost=11.95..1521.95 rows=683 width=50)\n              Order By: (embedding <=> $0)\n        ->  Memoize  (cost=0.14..0.18 rows=1 width=16)\n              Cache Key: dc.document_id\n              Cache Mode: logical\n              ->  Index Scan using documents_pkey on documents d  (cost=0.13..0.17 rows=1 width=16)\n                    Index Cond: (id = dc.document_id)\n                    Filter: ((organization_id = 'b7a551f7-eaa1-40e5-ab02-b2ec9f190b0c'::uuid) AND (status = 'READY'::document_status))",
+ "cases": [
+  {
+   "id": "qa-001",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.621025800704956,
+   "gate_refuses": false,
+   "top3": [
+    "streaming.md",
+    "retrieval.md",
+    "streaming.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-002",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 16,
+   "best": 0.608980119228363,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-003",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 12,
+   "best": 0.601924914178995,
+   "gate_refuses": false,
+   "top3": [
+    "streaming.md",
+    "observability.md",
+    "observability.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-004",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 1,
+   "best": 0.4951927060118564,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-005",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 5,
+   "best": 0.6286666393280029,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "security.md",
+    "architecture.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-006",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-007",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 2,
+   "best": 0.7171309421736576,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "security.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-008",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 14,
+   "best": 0.5857070931370809,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-009",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 1,
+   "best": 0.507070779800415,
+   "gate_refuses": false,
+   "top3": [
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-010",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-011",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-012",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 14,
+   "best": 0.6726832584927536,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "observability.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-013",
+   "category": "multi_chunk",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6061512412473932,
+   "gate_refuses": false,
+   "top3": [
+    "streaming.md",
+    "retrieval.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 5
+  },
+  {
+   "id": "qa-014",
+   "category": "multi_chunk",
+   "answerable": true,
+   "rows": 5,
+   "best": 0.6193831151540018,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "architecture.md",
+    "security.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-015",
+   "category": "multi_chunk",
+   "answerable": true,
+   "rows": 14,
+   "best": 0.5474776895357565,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "observability.md",
+    "security.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-016",
+   "category": "cross_section",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6677053174621245,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "retrieval.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-017",
+   "category": "cross_section",
+   "answerable": true,
+   "rows": 14,
+   "best": 0.6183586944127872,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "streaming.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-018",
+   "category": "cross_section",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-019",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-020",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.5612601041793823,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "streaming.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 2
+  },
+  {
+   "id": "qa-021",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-022",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.8274002568364311,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "retrieval.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-023",
+   "category": "negative_query",
+   "answerable": false,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-024",
+   "category": "negative_query",
+   "answerable": false,
+   "rows": 2,
+   "best": 0.44458977382687714,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-025",
+   "category": "negative_query",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6114718086404697,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "streaming.md",
+    "streaming.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-026",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-027",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 2,
+   "best": 0.49491155177882096,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "streaming.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-028",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-029",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 14,
+   "best": 0.48658058047294617,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "security.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-030",
+   "category": "reference_resolution",
+   "answerable": true,
+   "rows": 5,
+   "best": 0.5835310220718384,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "architecture.md",
+    "architecture.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-031",
+   "category": "reference_resolution",
+   "answerable": true,
+   "rows": 16,
+   "best": 0.6288923399980282,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-032",
+   "category": "reference_resolution",
+   "answerable": true,
+   "rows": 0,
+   "best": null,
+   "gate_refuses": true,
+   "top3": [],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-033",
+   "category": "injection_in_question",
+   "answerable": false,
+   "rows": 1,
+   "best": 0.5844845175743103,
+   "gate_refuses": false,
+   "top3": [
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-034",
+   "category": "injection_in_question",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6138228638383356,
+   "gate_refuses": false,
+   "top3": [
+    "streaming.md",
+    "streaming.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-035",
+   "category": "injection_in_question",
+   "answerable": false,
+   "rows": 14,
+   "best": 0.594862306424243,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "observability.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  }
+ ]
+}
