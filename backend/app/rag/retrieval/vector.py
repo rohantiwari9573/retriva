@@ -1,10 +1,15 @@
 """Semantic vector retrieval via pgvector cosine distance.
 
-Uses the existing ivfflat index and the existing embedding column - see
-docs/retrieval.md for why the index isn't retuned in this phase (it was
-built against an empty table in the Phase 4 migration, so its centroids
-are untrained; Postgres will generally fall back to a sequential scan at
-today's corpus size anyway, which is strictly more accurate).
+Search is exact: there is no approximate (IVFFlat or HNSW) index on the embedding
+column, so Postgres computes the distance to every READY chunk of the organization
+and returns the true nearest `limit`. The ix_documents_org_status and
+ix_document_chunks_document_id indexes narrow the scan to that one organization's
+chunks first, so cost grows with the tenant's corpus, not the whole table.
+
+The IVFFlat index from the Phase 4 migration was dropped in b4f2c81d9e37: it
+applied the tenant filter after an approximate scan and silently returned too few
+rows. Don't add one back without a strategy for tenant filtering. See
+docs/retrieval.md and tests/integration/test_vector_search_correctness.py.
 """
 
 import uuid
