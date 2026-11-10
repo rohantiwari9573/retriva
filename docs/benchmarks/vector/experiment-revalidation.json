@@ -1,0 +1,3100 @@
+{
+ "parameters": {
+  "top_k": 20,
+  "queries": 20
+ },
+ "pgvector": "0.8.6",
+ "postgres": "16.15 (Debian 16.15-1.pgdg12+2)",
+ "rows": [
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 6.7,
+   "rows_min": 3,
+   "recall_at_20_mean": 0.013,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.4,
+   "latency_max_ms": 0.92,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 7.35,
+   "rows_min": 3,
+   "recall_at_20_mean": 0.06,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.56,
+   "latency_max_ms": 0.77,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.342,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 0.57,
+   "latency_max_ms": 0.82,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.148,
+   "recall_at_20_min": 0.05,
+   "latency_p50_ms": 0.46,
+   "latency_max_ms": 0.62,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "5"
+   },
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.348,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 0.48,
+   "latency_max_ms": 0.78,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 0.2,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.62,
+   "latency_max_ms": 2.06,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 0.1,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.58,
+   "latency_max_ms": 2.0,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_uniform",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.53,
+   "latency_max_ms": 1.88,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 8.65,
+   "rows_min": 2,
+   "recall_at_20_mean": 0.175,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.42,
+   "latency_max_ms": 0.55,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 9.35,
+   "rows_min": 3,
+   "recall_at_20_mean": 0.465,
+   "recall_at_20_min": 0.15,
+   "latency_p50_ms": 0.46,
+   "latency_max_ms": 0.69,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.97,
+   "recall_at_20_min": 0.85,
+   "latency_p50_ms": 0.71,
+   "latency_max_ms": 1.27,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.8,
+   "recall_at_20_min": 0.6,
+   "latency_p50_ms": 0.51,
+   "latency_max_ms": 0.93,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "5"
+   },
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.935,
+   "recall_at_20_min": 0.75,
+   "latency_p50_ms": 0.53,
+   "latency_max_ms": 0.9,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.62,
+   "latency_max_ms": 2.19,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 0.1,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.65,
+   "latency_max_ms": 4.77,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_683_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 683,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.54,
+   "latency_max_ms": 2.19,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.36,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.74,
+   "latency_max_ms": 1.18,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.3,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.758,
+   "recall_at_20_min": 0.25,
+   "latency_p50_ms": 0.92,
+   "latency_max_ms": 1.19,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.2,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.06,
+   "latency_max_ms": 2.25,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.2,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.747,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 0.91,
+   "latency_max_ms": 1.22,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "8"
+   },
+   "build_seconds": 0.2,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.1,
+   "latency_max_ms": 1.3,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 1.0,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 1.04,
+   "latency_max_ms": 1.83,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 0.9,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.93,
+   "latency_max_ms": 1.79,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "single_tenant_5000_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "only",
+   "tenant_chunks": 5000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 10.57,
+   "latency_max_ms": 12.11,
+   "plan": [
+    "Seq Scan:document_chunks",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.275,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.33,
+   "latency_max_ms": 1.76,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 3.2,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.068,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.96,
+   "latency_max_ms": 1.47,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.0,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.0,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.78,
+   "latency_max_ms": 1.41,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.4,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.855,
+   "recall_at_20_min": 0.35,
+   "latency_p50_ms": 1.21,
+   "latency_max_ms": 2.58,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.4,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 3.6,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.18,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.84,
+   "latency_max_ms": 1.34,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.4,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.0,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.0,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.85,
+   "latency_max_ms": 1.19,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 1.2,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 2.89,
+   "latency_max_ms": 4.64,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 1.2,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 18.1,
+   "rows_min": 12,
+   "recall_at_20_mean": 0.685,
+   "recall_at_20_min": 0.45,
+   "latency_p50_ms": 2.94,
+   "latency_max_ms": 3.95,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 1.2,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.45,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.09,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.77,
+   "latency_max_ms": 3.59,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 1.2,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.725,
+   "recall_at_20_min": 0.15,
+   "latency_p50_ms": 1.25,
+   "latency_max_ms": 1.66,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 1.2,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.672,
+   "recall_at_20_min": 0.45,
+   "latency_p50_ms": 2.93,
+   "latency_max_ms": 4.02,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 1.2,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 21.3,
+   "latency_max_ms": 24.33,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.2,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 2.36,
+   "latency_max_ms": 3.01,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.2,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 15.8,
+   "rows_min": 8,
+   "recall_at_20_mean": 0.585,
+   "recall_at_20_min": 0.25,
+   "latency_p50_ms": 2.24,
+   "latency_max_ms": 3.7,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.2,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.25,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.05,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.12,
+   "latency_max_ms": 2.78,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 43.08,
+   "latency_max_ms": 62.97,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.81,
+   "latency_max_ms": 1.89,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.3,
+   "latency_max_ms": 0.43,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 8.7,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 42.86,
+   "latency_max_ms": 63.54,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 8.7,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.69,
+   "latency_max_ms": 0.91,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 8.7,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.37,
+   "latency_max_ms": 0.49,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 43.76,
+   "latency_max_ms": 48.65,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.8,
+   "latency_max_ms": 1.61,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.34,
+   "latency_max_ms": 0.67,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.008,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.63,
+   "latency_max_ms": 3.13,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 1.55,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.005,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.14,
+   "latency_max_ms": 1.58,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.0,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.0,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.97,
+   "latency_max_ms": 1.33,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.9,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.035,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.38,
+   "latency_max_ms": 1.71,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.9,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 2.3,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.028,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.85,
+   "latency_max_ms": 1.97,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.9,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.0,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.0,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.86,
+   "latency_max_ms": 1.82,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 1.5,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.175,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.96,
+   "latency_max_ms": 3.8,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 1.5,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 18.5,
+   "rows_min": 13,
+   "recall_at_20_mean": 0.145,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.94,
+   "latency_max_ms": 3.59,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 1.5,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.5,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.1,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 3.06,
+   "latency_max_ms": 4.71,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 1.7,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.02,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.2,
+   "latency_max_ms": 1.59,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 1.7,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.125,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 3.08,
+   "latency_max_ms": 4.34,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 1.7,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 21.81,
+   "latency_max_ms": 42.26,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.5,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.133,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.51,
+   "latency_max_ms": 3.14,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.5,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 15.75,
+   "rows_min": 8,
+   "recall_at_20_mean": 0.125,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.46,
+   "latency_max_ms": 2.79,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.5,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 0.25,
+   "rows_min": 0,
+   "recall_at_20_mean": 0.05,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 2.17,
+   "latency_max_ms": 2.53,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 27.0,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 47.44,
+   "latency_max_ms": 107.27,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 27.0,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.73,
+   "latency_max_ms": 1.45,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 27.0,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.68,
+   "latency_max_ms": 1.5,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 25.7,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 45.02,
+   "latency_max_ms": 60.26,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 25.7,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.68,
+   "latency_max_ms": 0.88,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 25.7,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.33,
+   "latency_max_ms": 0.64,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "big",
+   "tenant_chunks": 20000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 44.17,
+   "latency_max_ms": 73.1,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "small",
+   "tenant_chunks": 200,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.7,
+   "latency_max_ms": 0.91,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "big_small_tiny_uniform",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "tiny",
+   "tenant_chunks": 5,
+   "expected_rows": 5,
+   "rows_mean": 5.0,
+   "rows_min": 5,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 0.38,
+   "latency_max_ms": 0.65,
+   "plan": [
+    "Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.45,
+   "rows_min": 6,
+   "recall_at_20_mean": 0.275,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.21,
+   "latency_max_ms": 1.44,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.85,
+   "rows_min": 8,
+   "recall_at_20_mean": 0.295,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.04,
+   "latency_max_ms": 1.84,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.85,
+   "rows_min": 3,
+   "recall_at_20_mean": 0.277,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.03,
+   "latency_max_ms": 2.06,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.2,
+   "rows_min": 11,
+   "recall_at_20_mean": 0.277,
+   "recall_at_20_min": 0.05,
+   "latency_p50_ms": 1.01,
+   "latency_max_ms": 1.52,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.2,
+   "rows_min": 4,
+   "recall_at_20_mean": 0.277,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.95,
+   "latency_max_ms": 1.46,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.85,
+   "rows_min": 8,
+   "recall_at_20_mean": 0.285,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.08,
+   "latency_max_ms": 2.9,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.85,
+   "rows_min": 7,
+   "recall_at_20_mean": 0.267,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.99,
+   "latency_max_ms": 1.46,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 16.95,
+   "rows_min": 4,
+   "recall_at_20_mean": 0.307,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.99,
+   "latency_max_ms": 3.05,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.65,
+   "rows_min": 5,
+   "recall_at_20_mean": 0.287,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 0.98,
+   "latency_max_ms": 1.53,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "as_migrated_built_empty_lists100_probes1",
+   "settings": {},
+   "build_seconds": 0.0,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 17.65,
+   "rows_min": 4,
+   "recall_at_20_mean": 0.263,
+   "recall_at_20_min": 0.0,
+   "latency_p50_ms": 1.13,
+   "latency_max_ms": 1.64,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.45,
+   "rows_min": 5,
+   "recall_at_20_mean": 0.785,
+   "recall_at_20_min": 0.15,
+   "latency_p50_ms": 0.94,
+   "latency_max_ms": 1.5,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.5,
+   "rows_min": 6,
+   "recall_at_20_mean": 0.8,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 1.02,
+   "latency_max_ms": 1.71,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.8,
+   "rows_min": 5,
+   "recall_at_20_mean": 0.8,
+   "recall_at_20_min": 0.15,
+   "latency_p50_ms": 1.04,
+   "latency_max_ms": 1.36,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 19.1,
+   "rows_min": 10,
+   "recall_at_20_mean": 0.792,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 0.97,
+   "latency_max_ms": 1.41,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.4,
+   "rows_min": 4,
+   "recall_at_20_mean": 0.815,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 1.03,
+   "latency_max_ms": 1.57,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.4,
+   "rows_min": 5,
+   "recall_at_20_mean": 0.815,
+   "recall_at_20_min": 0.2,
+   "latency_p50_ms": 1.07,
+   "latency_max_ms": 1.4,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.7,
+   "rows_min": 5,
+   "recall_at_20_mean": 0.787,
+   "recall_at_20_min": 0.15,
+   "latency_p50_ms": 1.08,
+   "latency_max_ms": 1.22,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 19.0,
+   "rows_min": 4,
+   "recall_at_20_mean": 0.78,
+   "recall_at_20_min": 0.1,
+   "latency_p50_ms": 1.04,
+   "latency_max_ms": 1.46,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 19.0,
+   "rows_min": 9,
+   "recall_at_20_mean": 0.782,
+   "recall_at_20_min": 0.25,
+   "latency_p50_ms": 1.02,
+   "latency_max_ms": 1.34,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes1",
+   "settings": {},
+   "build_seconds": 1.1,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 18.55,
+   "rows_min": 2,
+   "recall_at_20_mean": 0.778,
+   "recall_at_20_min": 0.05,
+   "latency_p50_ms": 0.93,
+   "latency_max_ms": 1.14,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.48,
+   "latency_max_ms": 6.42,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.51,
+   "latency_max_ms": 6.0,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.58,
+   "latency_max_ms": 5.62,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.69,
+   "latency_max_ms": 6.78,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.66,
+   "latency_max_ms": 5.93,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.54,
+   "latency_max_ms": 6.02,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 5.09,
+   "latency_max_ms": 8.0,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.63,
+   "latency_max_ms": 5.7,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.94,
+   "latency_max_ms": 5.79,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_probes10",
+   "settings": {
+    "ivfflat.probes": "10"
+   },
+   "build_seconds": 0.9,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.84,
+   "latency_max_ms": 6.43,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.922,
+   "recall_at_20_min": 0.7,
+   "latency_p50_ms": 1.15,
+   "latency_max_ms": 1.63,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.875,
+   "recall_at_20_min": 0.55,
+   "latency_p50_ms": 1.04,
+   "latency_max_ms": 1.38,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.885,
+   "recall_at_20_min": 0.45,
+   "latency_p50_ms": 1.12,
+   "latency_max_ms": 1.76,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.88,
+   "recall_at_20_min": 0.6,
+   "latency_p50_ms": 1.96,
+   "latency_max_ms": 2.92,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.903,
+   "recall_at_20_min": 0.65,
+   "latency_p50_ms": 0.96,
+   "latency_max_ms": 1.41,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.865,
+   "recall_at_20_min": 0.45,
+   "latency_p50_ms": 0.9,
+   "latency_max_ms": 1.19,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.91,
+   "recall_at_20_min": 0.6,
+   "latency_p50_ms": 1.0,
+   "latency_max_ms": 1.33,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.895,
+   "recall_at_20_min": 0.65,
+   "latency_p50_ms": 0.99,
+   "latency_max_ms": 1.19,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.885,
+   "recall_at_20_min": 0.55,
+   "latency_p50_ms": 0.97,
+   "latency_max_ms": 1.22,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists100_iterative_relaxed",
+   "settings": {
+    "ivfflat.iterative_scan": "relaxed_order"
+   },
+   "build_seconds": 0.8,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 0.885,
+   "recall_at_20_min": 0.55,
+   "latency_p50_ms": 0.95,
+   "latency_max_ms": 1.47,
+   "plan": [
+    "Index Scan:ix_document_chunks_embedding_cosine",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.66,
+   "latency_max_ms": 11.19,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.64,
+   "latency_max_ms": 9.13,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.64,
+   "latency_max_ms": 5.59,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.54,
+   "latency_max_ms": 6.2,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.53,
+   "latency_max_ms": 5.49,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.4,
+   "latency_max_ms": 4.96,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.49,
+   "latency_max_ms": 5.95,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.46,
+   "latency_max_ms": 5.43,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.65,
+   "latency_max_ms": 6.32,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "rebuilt_lists_sqrt_probes_sqrt",
+   "settings": {
+    "ivfflat.probes": "11"
+   },
+   "build_seconds": 1.0,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.57,
+   "latency_max_ms": 6.12,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.21,
+   "latency_max_ms": 5.65,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.92,
+   "latency_max_ms": 6.94,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.92,
+   "latency_max_ms": 5.86,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.77,
+   "latency_max_ms": 5.55,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.92,
+   "latency_max_ms": 5.88,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.85,
+   "latency_max_ms": 6.17,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.81,
+   "latency_max_ms": 5.36,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.63,
+   "latency_max_ms": 6.24,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.75,
+   "latency_max_ms": 6.58,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_default_ef40",
+   "settings": {},
+   "build_seconds": 8.4,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.48,
+   "latency_max_ms": 6.66,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.51,
+   "latency_max_ms": 6.52,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 5.2,
+   "latency_max_ms": 6.78,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.98,
+   "latency_max_ms": 5.81,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.56,
+   "latency_max_ms": 5.53,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.58,
+   "latency_max_ms": 6.02,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.63,
+   "latency_max_ms": 5.57,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.78,
+   "latency_max_ms": 5.59,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.5,
+   "latency_max_ms": 6.59,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.89,
+   "latency_max_ms": 6.05,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "hnsw_iterative_strict",
+   "settings": {
+    "hnsw.iterative_scan": "strict_order"
+   },
+   "build_seconds": 7.9,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.42,
+   "latency_max_ms": 5.64,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t0",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.7,
+   "latency_max_ms": 7.26,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t1",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.23,
+   "latency_max_ms": 5.67,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t2",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.39,
+   "latency_max_ms": 5.28,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t3",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.31,
+   "latency_max_ms": 5.47,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t4",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.63,
+   "latency_max_ms": 5.66,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t5",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.58,
+   "latency_max_ms": 6.05,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t6",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.18,
+   "latency_max_ms": 4.61,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t7",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.35,
+   "latency_max_ms": 5.29,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t8",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.56,
+   "latency_max_ms": 5.26,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  },
+  {
+   "dataset": "ten_even_tenants_clustered",
+   "index_setup": "no_ann_index_exact",
+   "settings": {},
+   "build_seconds": 0.1,
+   "tenant": "t9",
+   "tenant_chunks": 2000,
+   "expected_rows": 20,
+   "rows_mean": 20.0,
+   "rows_min": 20,
+   "recall_at_20_mean": 1.0,
+   "recall_at_20_min": 1.0,
+   "latency_p50_ms": 4.54,
+   "latency_max_ms": 5.96,
+   "plan": [
+    "Bitmap Heap Scan:document_chunks",
+    "Bitmap Index Scan:ix_document_chunks_document_id",
+    "Seq Scan:documents"
+   ]
+  }
+ ]
+}

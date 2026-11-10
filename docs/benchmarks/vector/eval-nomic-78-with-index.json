@@ -1,0 +1,69 @@
+{
+  "dataset_version": "v1",
+  "num_cases": 35,
+  "timestamp": "2026-11-09T15:33:51.708835+00:00",
+  "environment": {
+    "embedding_model": "text-embedding-nomic-embed-text-v1.5",
+    "llm_model": "qwen2.5-7b-instruct",
+    "retrieval_top_k": 8,
+    "rrf_k": 60,
+    "vector_weight": 0.3,
+    "keyword_weight": 0.7
+  },
+  "retrieval": {
+    "vector_only": {
+      "recall_at": {
+        "1": 0.4,
+        "3": 0.5714285714285714,
+        "5": 0.6,
+        "10": 0.6
+      },
+      "mrr": 0.4880952380952381,
+      "ndcg_at": {
+        "5": 0.4654467417167923,
+        "10": 0.5058759656211619
+      },
+      "num_cases": 35
+    },
+    "keyword_only": {
+      "recall_at": {
+        "1": 0.17142857142857143,
+        "3": 0.17142857142857143,
+        "5": 0.17142857142857143,
+        "10": 0.17142857142857143
+      },
+      "mrr": 0.17142857142857143,
+      "ndcg_at": {
+        "5": 0.1588145024646634,
+        "10": 0.16650544140299128
+      },
+      "num_cases": 35
+    },
+    "hybrid_rrf": {
+      "recall_at": {
+        "1": 0.45714285714285713,
+        "3": 0.6,
+        "5": 0.6,
+        "10": 0.6
+      },
+      "mrr": 0.5285714285714286,
+      "ndcg_at": {
+        "5": 0.4859841143007535,
+        "10": 0.5299105494169772
+      },
+      "num_cases": 35
+    }
+  },
+  "generation": {
+    "executed": false,
+    "reason": "LM Studio unavailable or not requested"
+  },
+  "citations": {
+    "executed": false,
+    "reason": "LM Studio unavailable or not requested"
+  },
+  "injection": {
+    "executed": false,
+    "reason": "LM Studio unavailable or not requested"
+  }
+}
