@@ -8,6 +8,7 @@ lock are exercised as they are in deployment.
 import os
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -28,6 +29,10 @@ from app.core.migrations import (
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+# The revision production ran before the vector-index migration (head), so the
+# states below are the ones a deploy actually meets.
+PREVIOUS_REVISION = "6f45bc893ebc"
+VECTOR_INDEX = "ix_document_chunks_embedding_cosine"
 
 
 def _admin_conninfo() -> str:
@@ -154,7 +159,7 @@ async def test_api_schema_check_rejects_an_unmigrated_database(fresh_database: s
 
 async def test_api_schema_check_rejects_a_database_behind_head(fresh_database: str) -> None:
     conninfo = _database_url(fresh_database).replace("postgresql+asyncpg://", "postgresql://")
-    previous = "284636820202"  # the revision immediately before current head
+    previous = PREVIOUS_REVISION
     with psycopg.connect(conninfo, autocommit=True) as connection:
         connection.execute("CREATE TABLE alembic_version (version_num varchar(32) PRIMARY KEY)")
         connection.execute("INSERT INTO alembic_version VALUES (%s)", (previous,))
@@ -197,3 +202,81 @@ def test_migrate_tolerates_a_newer_database(fresh_database: str, args: tuple[str
     assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [
         ("a_future_revision",)
     ]
+
+
+# --- the migration step driving the vector-index migration --------------------
+
+
+def _upgrade_to(database: str, revision: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", revision],
+        cwd=BACKEND_ROOT,
+        env={**os.environ, "DATABASE_URL": _database_url(database)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _revision_and_index(database: str) -> tuple[str, bool]:
+    version = _query(database, "SELECT version_num FROM alembic_version")[0][0]
+    has_index = _query(database, f"SELECT to_regclass('{VECTOR_INDEX}') IS NOT NULL")[0][0]
+    return version, has_index
+
+
+def test_migration_check_reports_the_vector_migration_as_pending(fresh_database: str) -> None:
+    """Dropping an index loses no data, so the destructive guard must not refuse it."""
+    _upgrade_to(fresh_database, PREVIOUS_REVISION)
+
+    code, output = _run_migrate(_database_url(fresh_database), "--check")
+
+    assert code == EXIT_OK, output
+    assert "migration_pending" in output
+    assert "migration_refused_destructive" not in output
+    assert _revision_and_index(fresh_database) == (PREVIOUS_REVISION, True)
+
+
+def test_migration_step_upgrades_the_previous_production_revision(fresh_database: str) -> None:
+    _upgrade_to(fresh_database, PREVIOUS_REVISION)
+
+    code, output = _run_migrate(_database_url(fresh_database))
+
+    assert code == EXIT_OK, output
+    assert _revision_and_index(fresh_database) == (expected_head(), False)
+
+
+def test_migration_step_gives_up_on_a_held_table_lock_and_can_be_rerun(
+    fresh_database: str,
+) -> None:
+    """A live reader blocks DROP INDEX. The step must fail fast with nothing applied,
+    release the advisory lock, and succeed once the reader is gone."""
+    _upgrade_to(fresh_database, PREVIOUS_REVISION)
+    conninfo = _database_url(fresh_database).replace("postgresql+asyncpg://", "postgresql://")
+
+    with psycopg.connect(conninfo) as blocker:
+        blocker.execute("LOCK TABLE document_chunks IN ACCESS SHARE MODE")
+        started = time.monotonic()
+        code, output = _run_migrate(_database_url(fresh_database))
+        elapsed = time.monotonic() - started
+
+        assert code == EXIT_MIGRATION_FAILED, output
+        assert "LockNotAvailable" in output or "lock timeout" in output, output
+        assert elapsed < 60, elapsed
+        assert _revision_and_index(fresh_database) == (PREVIOUS_REVISION, True)
+        blocker.rollback()
+
+    code, output = _run_migrate(_database_url(fresh_database))
+
+    assert code == EXIT_OK, output
+    assert _revision_and_index(fresh_database) == (expected_head(), False)
+
+
+async def test_api_schema_check_rejects_the_previous_production_revision(
+    fresh_database: str,
+) -> None:
+    _upgrade_to(fresh_database, PREVIOUS_REVISION)
+
+    with pytest.raises(SchemaNotMigratedError, match=PREVIOUS_REVISION):
+        await _check_schema(fresh_database)
