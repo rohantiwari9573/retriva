@@ -1,14 +1,19 @@
 """Caps request bodies before anything buffers them.
 
-The 25 MB document limit (DocumentService._read_and_hash) only runs after Starlette
-has parsed the whole multipart body, spooling file parts to a temporary file with no
-size cap. Without this, any signed-in user could make the API write an arbitrarily
-large body to disk before getting a 413, and a body cut short by a proxy would leave
-the request waiting for bytes that never arrive.
+FastAPI reads a request body before it runs any dependency, including auth and rate
+limits. Without a cap, anyone, signed in or not, could make the API hold an
+arbitrarily large JSON body in memory (one 300 MB login request took the API from
+118 MiB to 1.07 GiB) or spool a multipart body to disk (264 MB for a 300 MB upload),
+all before a 401. The 25 MB document limit in DocumentService._read_and_hash only
+runs after that. A body cut short by a proxy also left the request waiting for bytes
+that never arrive.
 
-The cap is the document limit plus room for multipart framing, so every valid upload
-still fits. A declared Content-Length over it is refused before the body is read; a
-body without one (chunked) is counted as it arrives and refused once it passes.
+Only the document upload route accepts large bodies: its cap is the document limit
+plus room for multipart framing, so every valid upload still fits. Every other
+request is JSON whose largest field is a few thousand characters, so it gets
+DEFAULT_MAX_BODY_BYTES. A declared Content-Length over the cap is refused before the
+body is read; a body without one (chunked) is counted as it arrives and refused once
+it passes.
 
 Before the 413 is sent, the rest of the body is read and discarded, never stored, up
 to a bound in bytes and time. Closing with unread data in the socket makes the
@@ -19,6 +24,7 @@ receive() reports a disconnect instead of more body.
 
 import asyncio
 import json
+import re
 import time
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -27,6 +33,10 @@ from app.core.config import settings
 
 # Multipart boundaries and part headers add well under this.
 MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+# Every request except a document upload. Chat messages and queries are capped at a
+# few thousand characters by their schemas.
+DEFAULT_MAX_BODY_BYTES = 1024 * 1024
+_UPLOAD_PATH = re.compile(r"^/api/v1/organizations/[^/]+/documents/?$")
 # How much of a refused body is read and thrown away so the client sees the 413.
 DRAIN_MAX_BYTES = 64 * 1024 * 1024
 DRAIN_MAX_SECONDS = 15.0
@@ -36,22 +46,27 @@ DRAIN_IDLE_SECONDS = 2.0
 
 
 def max_request_body_bytes() -> int:
+    """The cap for a document upload."""
     return settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES
+
+
+def is_document_upload(scope: Scope) -> bool:
+    return scope.get("method") == "POST" and bool(_UPLOAD_PATH.match(scope.get("path", "")))
 
 
 class _BodyTooLarge(Exception):
     pass
 
 
-async def _send_too_large(send: Send) -> None:
-    body = json.dumps(
-        {
-            "error": {
-                "code": "FILE_TOO_LARGE",
-                "message": f"File exceeds the maximum size of {settings.MAX_DOCUMENT_SIZE_MB} MB.",
-            }
+async def _send_too_large(send: Send, *, upload: bool) -> None:
+    if upload:
+        error = {
+            "code": "FILE_TOO_LARGE",
+            "message": f"File exceeds the maximum size of {settings.MAX_DOCUMENT_SIZE_MB} MB.",
         }
-    ).encode()
+    else:
+        error = {"code": "REQUEST_TOO_LARGE", "message": "Request body is too large."}
+    body = json.dumps({"error": error}).encode()
     await send(
         {
             "type": "http.response.start",
@@ -92,16 +107,18 @@ class RequestBodyLimitMiddleware:
         self.app = app
         self._max_bytes = max_bytes
 
-    @property
-    def max_bytes(self) -> int:
+    def limit_for(self, scope: Scope) -> int:
         # Read per request, so it always follows the current settings.
-        return self._max_bytes if self._max_bytes is not None else max_request_body_bytes()
+        if self._max_bytes is not None:
+            return self._max_bytes
+        return max_request_body_bytes() if is_document_upload(scope) else DEFAULT_MAX_BODY_BYTES
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        max_bytes = self.max_bytes
+        max_bytes = self.limit_for(scope)
+        upload = is_document_upload(scope)
         headers = dict(scope.get("headers", []))
 
         raw_length = headers.get(b"content-length")
@@ -118,7 +135,7 @@ class RequestBodyLimitMiddleware:
                 expects_continue = headers.get(b"expect", b"").lower() == b"100-continue"
                 if not expects_continue and declared <= DRAIN_MAX_BYTES:
                     await _drain(receive, already_received=False)
-                await _send_too_large(send)
+                await _send_too_large(send, upload=upload)
                 return
 
         received = 0
@@ -157,4 +174,4 @@ class RequestBodyLimitMiddleware:
         # reads its body after responding, so this is a guard, not a path in use.
         if exceeded and not response_started:
             await _drain(receive, already_received=body_complete)
-            await _send_too_large(send)
+            await _send_too_large(send, upload=upload)
