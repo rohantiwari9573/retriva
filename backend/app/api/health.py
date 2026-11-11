@@ -42,9 +42,10 @@ async def readiness(response: Response, db: AsyncSession = Depends(get_db)) -> d
     # Redis being down degrades this instance but doesn't make it unready: rate
     # limiting falls back to per-process counters and auth keeps working, whereas
     # pulling every instance out of rotation would turn a Redis outage into a
-    # full one. Celery-mode uploads do need the broker: while it is down an upload
-    # request waits on Celery's publish retries (minutes, not a fast error) and is
-    # delivered once Redis returns. Inline mode, used on Render, doesn't use it.
+    # full one. Celery-mode uploads do need Redis: while it is down, queuing a
+    # document blocks in Celery's result-backend reconnect loop (measured 12 s to
+    # 150 s) before failing the document with a 503; if Redis returns in time the
+    # upload goes through. Inline mode, used on Render, doesn't queue through it.
     redis_client: Redis = Redis.from_url(
         settings.REDIS_URL,
         socket_connect_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,

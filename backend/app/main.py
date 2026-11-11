@@ -21,6 +21,7 @@ from app.core.metrics import (
 )
 from app.core.migrations import assert_schema_is_current
 from app.core.request_id import resolve_request_id
+from app.core.request_size import RequestBodyLimitMiddleware
 from app.core.telemetry import (
     init_tracing,
     instrument_celery,
@@ -102,6 +103,9 @@ instrument_redis()
 instrument_httpx()
 instrument_celery()
 
+# Added before CORS so it runs inside it: a 413 still carries CORS headers and the
+# browser can read the error.
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
