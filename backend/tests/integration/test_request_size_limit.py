@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from httpx import AsyncClient
 
 from app.core.config import settings
-from app.core.request_size import MULTIPART_OVERHEAD_BYTES, max_request_body_bytes
+from app.core.request_size import max_request_body_bytes
 from tests.integration.test_documents import _register_and_create_org
 
 
@@ -16,10 +16,19 @@ async def _new_org(client: AsyncClient) -> str:
     return (await _register_and_create_org(client, email, "Size"))["id"]
 
 
-def test_cap_leaves_room_for_the_largest_permitted_document() -> None:
-    assert max_request_body_bytes() == (
-        settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES
+async def test_the_largest_permitted_document_is_accepted(client: AsyncClient) -> None:
+    """A file of exactly MAX_DOCUMENT_SIZE_MB plus multipart framing fits under the cap."""
+    org_id = await _new_org(client)
+    size = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
+    content = b"largest permitted document" + b"a" * (size - 26)
+    assert len(content) == size
+
+    response = await client.post(
+        f"/api/v1/organizations/{org_id}/documents",
+        files={"file": ("largest.txt", content, "text/plain")},
     )
+
+    assert response.status_code == 201, response.text
 
 
 async def test_declared_oversized_upload_is_refused_with_cors_headers(
@@ -58,14 +67,17 @@ async def test_streamed_oversized_upload_is_refused(client: AsyncClient) -> None
             yield chunk
         yield b"\r\n--B--\r\n"
 
+    origin = settings.CORS_ORIGINS[0]
+
     response = await client.post(
         f"/api/v1/organizations/{org_id}/documents",
         content=body(),
-        headers={"content-type": "multipart/form-data; boundary=B"},
+        headers={"content-type": "multipart/form-data; boundary=B", "origin": origin},
     )
 
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "FILE_TOO_LARGE"
+    assert response.headers.get("access-control-allow-origin") == origin
 
 
 async def test_ordinary_requests_are_unaffected(client: AsyncClient) -> None:

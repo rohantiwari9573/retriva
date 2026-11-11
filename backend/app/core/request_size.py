@@ -102,18 +102,24 @@ class RequestBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
         max_bytes = self.max_bytes
+        headers = dict(scope.get("headers", []))
 
-        for name, value in scope.get("headers", []):
-            if name == b"content-length":
-                try:
-                    declared = int(value)
-                except ValueError:
-                    break  # malformed: the server and app reject it as before
-                if declared > max_bytes:
+        raw_length = headers.get(b"content-length")
+        if raw_length is not None:
+            try:
+                declared: int | None = int(raw_length)
+            except ValueError:
+                declared = None  # malformed: the server and app reject it as before
+            if declared is not None and declared > max_bytes:
+                # Draining is only worth it when the client will then read the 413:
+                # not when it is waiting for "100 Continue" (reading would invite the
+                # body it hasn't sent), and not when the body is too large to drain
+                # within the bound (the connection resets regardless).
+                expects_continue = headers.get(b"expect", b"").lower() == b"100-continue"
+                if not expects_continue and declared <= DRAIN_MAX_BYTES:
                     await _drain(receive, already_received=False)
-                    await _send_too_large(send)
-                    return
-                break
+                await _send_too_large(send)
+                return
 
         received = 0
         exceeded = False
@@ -146,6 +152,9 @@ class RequestBodyLimitMiddleware:
         except Exception:
             if not exceeded:
                 raise
+        # If the app had already started a response before the body went over the
+        # cap, the rest of that response is dropped and no 413 can be sent; no route
+        # reads its body after responding, so this is a guard, not a path in use.
         if exceeded and not response_started:
             await _drain(receive, already_received=body_complete)
             await _send_too_large(send)

@@ -180,7 +180,12 @@ def _raw_scope(content_length: int | None) -> dict:
     }
 
 
-async def _run_raw(content_length: int | None, chunks: int, chunk_size: int = 500):
+async def _run_raw(
+    content_length: int | None,
+    chunks: int,
+    chunk_size: int = 500,
+    extra_headers: list[tuple[bytes, bytes]] | None = None,
+):
     """Feeds the middleware a body in chunks; returns (status, chunks consumed)."""
     consumed = 0
     sent: list[Message] = []
@@ -195,9 +200,9 @@ async def _run_raw(content_length: int | None, chunks: int, chunk_size: int = 50
         # What a real server allows: after the response, no more body is readable.
         sent.append({**message, "consumed_before": consumed})
 
-    await RequestBodyLimitMiddleware(_app({}), max_bytes=LIMIT)(
-        _raw_scope(content_length), receive, send
-    )
+    scope = _raw_scope(content_length)
+    scope["headers"] = scope["headers"] + (extra_headers or [])
+    await RequestBodyLimitMiddleware(_app({}), max_bytes=LIMIT)(scope, receive, send)
     assert sent[0]["consumed_before"] == consumed, "the body must be drained before the 413"
     return sent[0]["status"], consumed
 
@@ -219,10 +224,11 @@ async def test_refused_chunked_body_is_drained_to_its_end() -> None:
 async def test_draining_stops_at_its_byte_bound(monkeypatch) -> None:
     monkeypatch.setattr("app.core.request_size.DRAIN_MAX_BYTES", 2000)
 
-    status, consumed = await _run_raw(content_length=10**9, chunks=10**6)
+    status, consumed = await _run_raw(content_length=None, chunks=10**6)
 
     assert status == 413
-    assert consumed <= 2000 // 500 + 1
+    # Up to the cap (LIMIT) is read before refusing, then at most the drain bound.
+    assert consumed <= (LIMIT + 2000) // 500 + 2
 
 
 async def test_draining_stops_when_the_sender_goes_quiet(monkeypatch) -> None:
@@ -252,3 +258,37 @@ async def test_draining_stops_when_the_sender_goes_quiet(monkeypatch) -> None:
     )
 
     assert sent[0]["status"] == 413
+
+
+async def test_a_client_waiting_for_100_continue_is_not_asked_for_the_body() -> None:
+    """Reading would make the server send 100 Continue and invite the upload."""
+    status, consumed = await _run_raw(
+        content_length=10 * 500, chunks=10, extra_headers=[(b"expect", b"100-continue")]
+    )
+
+    assert status == 413
+    assert consumed == 0
+
+
+async def test_a_body_too_large_to_drain_is_refused_without_reading_it(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.request_size.DRAIN_MAX_BYTES", 2000)
+
+    status, consumed = await _run_raw(content_length=10**9, chunks=10**6)
+
+    assert status == 413
+    assert consumed == 0
+
+
+async def test_app_errors_on_bodies_within_the_cap_still_propagate() -> None:
+    async def failing(scope, receive, send) -> None:
+        await receive()
+        raise RuntimeError("boom")
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"small", "more_body": False}
+
+    async def send(message: Message) -> None:
+        raise AssertionError("no response expected")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await RequestBodyLimitMiddleware(failing, max_bytes=LIMIT)(_raw_scope(5), receive, send)
