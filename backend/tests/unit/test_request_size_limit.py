@@ -47,14 +47,11 @@ async def _chunks(total: int, size: int = 100) -> AsyncIterator[bytes]:
 
 
 def _assert_too_large(response: httpx.Response) -> None:
+    # The test app's routes aren't the document upload route, so the generic error.
     assert response.status_code == 413
     assert response.json() == {
-        "error": {
-            "code": "FILE_TOO_LARGE",
-            "message": response.json()["error"]["message"],
-        }
+        "error": {"code": "REQUEST_TOO_LARGE", "message": "Request body is too large."}
     }
-    assert "maximum size" in response.json()["error"]["message"]
 
 
 async def test_body_at_the_limit_is_accepted() -> None:
@@ -292,3 +289,31 @@ async def test_app_errors_on_bodies_within_the_cap_still_propagate() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         await RequestBodyLimitMiddleware(failing, max_bytes=LIMIT)(_raw_scope(5), receive, send)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected"),
+    [
+        ("POST", "/api/v1/organizations/1b2c/documents", True),
+        ("POST", "/api/v1/organizations/1b2c/documents/", True),
+        ("GET", "/api/v1/organizations/1b2c/documents", False),
+        ("POST", "/api/v1/organizations/1b2c/documents/abc/retry", False),
+        ("POST", "/api/v1/auth/login", False),
+        ("POST", "/api/v1/organizations/1b2c/chat", False),
+        ("POST", "/api/v1/organizations/a/b/documents", False),
+    ],
+)
+def test_only_the_document_upload_route_gets_the_large_cap(
+    method: str, path: str, expected: bool
+) -> None:
+    from app.core.request_size import (
+        DEFAULT_MAX_BODY_BYTES,
+        is_document_upload,
+        max_request_body_bytes,
+    )
+
+    scope = {"type": "http", "method": method, "path": path}
+
+    assert is_document_upload(scope) is expected
+    limit = RequestBodyLimitMiddleware(_app({})).limit_for(scope)
+    assert limit == (max_request_body_bytes() if expected else DEFAULT_MAX_BODY_BYTES)

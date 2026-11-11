@@ -89,3 +89,42 @@ async def test_ordinary_requests_are_unaffected(client: AsyncClient) -> None:
     )
 
     assert response.status_code == 201
+
+
+async def test_large_json_bodies_are_refused_before_auth(client: AsyncClient) -> None:
+    """FastAPI reads JSON into memory before any dependency; the cap must stop it."""
+    from app.core.request_size import DEFAULT_MAX_BODY_BYTES
+
+    padding = "a" * (DEFAULT_MAX_BODY_BYTES + 1)
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody@example.com", "password": padding},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+
+
+async def test_streamed_large_json_is_refused(client: AsyncClient) -> None:
+    from app.core.request_size import DEFAULT_MAX_BODY_BYTES
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b'{"email": "nobody@example.com", "password": "'
+        for _ in range(DEFAULT_MAX_BODY_BYTES // 65536 + 2):
+            yield b"a" * 65536
+        yield b'"}'
+
+    response = await client.post(
+        "/api/v1/auth/login", content=body(), headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 413
+
+
+async def test_ordinary_json_under_the_default_cap_is_unaffected(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody@example.com", "password": "a" * 4000},
+    )
+
+    assert response.status_code in (401, 422)
