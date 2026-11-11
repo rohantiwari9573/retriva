@@ -1,0 +1,499 @@
+{
+ "chunks": 683,
+ "ivfflat_indexes": 0,
+ "threshold": 0.09,
+ "embedding_model": "text-embedding-nomic-embed-text-v1.5",
+ "plan": "Limit  (cost=110.91..110.96 rows=20 width=24)\n  InitPlan 1 (returns $0)\n    ->  Limit  (cost=0.00..0.13 rows=1 width=18)\n          ->  Seq Scan on document_chunks  (cost=0.00..86.83 rows=683 width=18)\n  ->  Sort  (cost=110.79..112.50 rows=683 width=24)\n        Sort Key: ((dc.embedding <=> $0))\n        ->  Hash Join  (cost=1.19..92.61 rows=683 width=24)\n              Hash Cond: (dc.document_id = d.id)\n              ->  Seq Scan on document_chunks dc  (cost=0.00..86.83 rows=683 width=50)\n              ->  Hash  (cost=1.10..1.10 rows=7 width=16)\n                    ->  Seq Scan on documents d  (cost=0.00..1.10 rows=7 width=16)\n                          Filter: ((organization_id = 'b7a551f7-eaa1-40e5-ab02-b2ec9f190b0c'::uuid) AND (status = 'READY'::document_status))",
+ "cases": [
+  {
+   "id": "qa-001",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6430044174194336,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "document-ingestion.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-002",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.613312304019928,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-003",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.672091484554841,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "document-ingestion.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-004",
+   "category": "direct_lookup",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6502420097733753,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "document-ingestion.md",
+    "architecture.md"
+   ],
+   "relevant_rank": 2
+  },
+  {
+   "id": "qa-005",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6365679502487183,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "architecture.md",
+    "observability.md"
+   ],
+   "relevant_rank": 2
+  },
+  {
+   "id": "qa-006",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6398878073592017,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "security.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-007",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.7171309421736576,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "retrieval.md",
+    "retrieval.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-008",
+   "category": "semantic_query",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6558866500854492,
+   "gate_refuses": false,
+   "top3": [
+    "streaming.md",
+    "document-ingestion.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 4
+  },
+  {
+   "id": "qa-009",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6514564946727903,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "observability.md",
+    "observability.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-010",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.7059502180844428,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "document-ingestion.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-011",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.7353034457745234,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "security.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-012",
+   "category": "keyword_heavy",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6726832584927536,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "document-ingestion.md",
+    "retrieval.md"
+   ],
+   "relevant_rank": 3
+  },
+  {
+   "id": "qa-013",
+   "category": "multi_chunk",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6893450617790222,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "document-ingestion.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-014",
+   "category": "multi_chunk",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.704454639421268,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "streaming.md",
+    "observability.md"
+   ],
+   "relevant_rank": 2
+  },
+  {
+   "id": "qa-015",
+   "category": "multi_chunk",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6366595029830933,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "security.md",
+    "security.md"
+   ],
+   "relevant_rank": 2
+  },
+  {
+   "id": "qa-016",
+   "category": "cross_section",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.7223889662259214,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "retrieval.md",
+    "observability.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-017",
+   "category": "cross_section",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.7172008752822876,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "observability.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-018",
+   "category": "cross_section",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.7068936614127884,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "security.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-019",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6503391265869187,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "streaming.md",
+    "retrieval.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-020",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6231247782707214,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "streaming.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 2
+  },
+  {
+   "id": "qa-021",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6449680328369141,
+   "gate_refuses": false,
+   "top3": [
+    "observability.md",
+    "document-ingestion.md",
+    "observability.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-022",
+   "category": "terminology",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.8274002568364311,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "retrieval.md",
+    "retrieval.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-023",
+   "category": "negative_query",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6395535469055176,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "architecture.md",
+    "observability.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-024",
+   "category": "negative_query",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6046391905736684,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "security.md",
+    "observability.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-025",
+   "category": "negative_query",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6774278090851206,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "observability.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-026",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.624199390411377,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "document-ingestion.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-027",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.580077136750393,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "document-ingestion.md",
+    "streaming.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-028",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6049121257715161,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "document-ingestion.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-029",
+   "category": "unanswerable",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.5800774097442627,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "document-ingestion.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-030",
+   "category": "reference_resolution",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6066720485687256,
+   "gate_refuses": false,
+   "top3": [
+    "retrieval.md",
+    "retrieval.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-031",
+   "category": "reference_resolution",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.6408578539405986,
+   "gate_refuses": false,
+   "top3": [
+    "security.md",
+    "security.md",
+    "document-ingestion.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-032",
+   "category": "reference_resolution",
+   "answerable": true,
+   "rows": 20,
+   "best": 0.5823079098646597,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "security.md",
+    "streaming.md"
+   ],
+   "relevant_rank": 1
+  },
+  {
+   "id": "qa-033",
+   "category": "injection_in_question",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6823339462280273,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "streaming.md",
+    "streaming.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-034",
+   "category": "injection_in_question",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6534977968337824,
+   "gate_refuses": false,
+   "top3": [
+    "document-ingestion.md",
+    "security.md",
+    "security.md"
+   ],
+   "relevant_rank": null
+  },
+  {
+   "id": "qa-035",
+   "category": "injection_in_question",
+   "answerable": false,
+   "rows": 20,
+   "best": 0.6663256287574768,
+   "gate_refuses": false,
+   "top3": [
+    "architecture.md",
+    "document-ingestion.md",
+    "streaming.md"
+   ],
+   "relevant_rank": null
+  }
+ ]
+}

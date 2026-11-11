@@ -58,26 +58,42 @@ document's chunks could be retrieved and cited as if they were current.
 
 ### Index tuning: a known, documented gap
 
-The `ivfflat` index (`ix_document_chunks_embedding_cosine`) was created in
-the Phase 4 migration against an **empty table**. IVFFlat's clustering
-(`lists = 100`) is trained from whatever data exists at index-creation
-time - training it against zero rows means its centroids are meaningless
-for the data actually stored later. In practice, at this project's current
-corpus size, PostgreSQL's query planner will generally choose a sequential
-scan over the (badly-trained) index anyway, which is *more* accurate, not
-less - so this isn't silently producing wrong results today. It would
-become a real problem at a large corpus size, where a seq scan stops being
-the planner's obvious choice and the mis-trained index starts actually
-getting used.
+Vector search is **exact**: there's deliberately no approximate (ANN) index on
+`document_chunks.embedding`. Postgres finds the tenant's chunks through the ordinary
+document indexes and sorts them by distance.
 
-**Remedy, if/when the corpus grows large enough to matter:**
-`REINDEX INDEX ix_document_chunks_embedding_cosine;` after a meaningful
-amount of real data exists, so IVFFlat's centroids reflect actual vector
-distribution - or migrate to an `hnsw` index (pgvector ≥0.5), which doesn't
-have this "must be trained on real data" sensitivity in the same way.
-Neither was done in this phase: doing it now, against an empty/near-empty
-table, would not have fixed anything and would have been indistinguishable
-from doing nothing.
+An earlier version had an IVFFlat index, created on an empty table with `lists = 100`.
+This document used to say that was harmless because the planner would avoid it. That
+was wrong: the planner did use it, and vector search silently returned too few rows, 7
+of 20 in one measured case, with no error. There are two separate causes:
+
+1. **Scan fraction.** `probes = 1` searches one list of 100. At 683 chunks that's about
+   7 rows, however well the index is trained.
+2. **Filtering after the scan.** An ANN index finds nearby rows across all tenants, and
+   the tenant filter applies afterwards. A small tenant's rows often aren't among them.
+
+Rebuilding on real data improves ranking but fixes neither. More probes and iterative
+scans help but still lost results or returned wrong ones in the measurements below.
+
+| Setup | One tenant, 683 chunks: rows, recall | Small tenant (200 beside 20,000): rows, recall | Tiny tenant (5): rows |
+|---|---|---|---|
+| As migrated, built empty | 11.9 of 20, 0.14 | 3.5 of 20, 0.09 | 0.1 of 5 |
+| Rebuilt on data | 9.5 of 20, 0.46 | 3.3 of 20, 0.17 | 0 of 5 |
+| Rebuilt, `probes = 10` | 20 of 20, 0.96 | 16.9 of 20, 0.64 | 0.35 of 5 |
+| Rebuilt, iterative scan | 20 of 20, 0.81 | 20 of 20, 0.67 | 5 of 5 |
+| **No ANN index** | **20 of 20, 1.0** | **20 of 20, 1.0** | **5 of 5** |
+
+Clustered synthetic vectors, 20 queries, recall@20 against exact search. Full results and
+how to reproduce them are in [benchmarks/vector/README.md](benchmarks/vector/README.md).
+
+**The cost is latency that grows with a tenant's size:** about 1.5 ms at 683 chunks,
+11 ms at 5,000 and 43 ms at 20,000, measured locally. Neon's free 1 GB limits the whole
+corpus to very roughly 300,000 chunks.
+
+**If a tenant outgrows this,** extrapolating suggests a few hundred ms at 100,000 chunks.
+Consider HNSW with `hnsw.iterative_scan` then, and measure recall against exact search
+first. HNSW returned full results where it was used here, but in the multi-tenant cases
+the planner didn't choose it, so those runs don't test it under tenant filtering.
 
 ## Keyword search
 

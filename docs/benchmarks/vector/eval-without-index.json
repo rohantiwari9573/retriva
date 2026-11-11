@@ -1,0 +1,69 @@
+{
+  "dataset_version": "v1",
+  "num_cases": 35,
+  "timestamp": "2026-11-06T09:33:16.872453+00:00",
+  "environment": {
+    "embedding_model": "hashed-bow",
+    "llm_model": "qwen2.5-7b-instruct",
+    "retrieval_top_k": 8,
+    "rrf_k": 60,
+    "vector_weight": 0.3,
+    "keyword_weight": 0.7
+  },
+  "retrieval": {
+    "vector_only": {
+      "recall_at": {
+        "1": 0.14285714285714285,
+        "3": 0.3142857142857143,
+        "5": 0.4,
+        "10": 0.4857142857142857
+      },
+      "mrr": 0.2562244897959184,
+      "ndcg_at": {
+        "5": 0.24884536423407794,
+        "10": 0.3060352026101887
+      },
+      "num_cases": 35
+    },
+    "keyword_only": {
+      "recall_at": {
+        "1": 0.17142857142857143,
+        "3": 0.17142857142857143,
+        "5": 0.17142857142857143,
+        "10": 0.17142857142857143
+      },
+      "mrr": 0.17142857142857143,
+      "ndcg_at": {
+        "5": 0.1588145024646634,
+        "10": 0.1663061417184103
+      },
+      "num_cases": 35
+    },
+    "hybrid_rrf": {
+      "recall_at": {
+        "1": 0.2857142857142857,
+        "3": 0.37142857142857144,
+        "5": 0.42857142857142855,
+        "10": 0.4857142857142857
+      },
+      "mrr": 0.35119047619047616,
+      "ndcg_at": {
+        "5": 0.3017903841508444,
+        "10": 0.35680706735448864
+      },
+      "num_cases": 35
+    }
+  },
+  "generation": {
+    "executed": false,
+    "reason": "LM Studio unavailable or not requested"
+  },
+  "citations": {
+    "executed": false,
+    "reason": "LM Studio unavailable or not requested"
+  },
+  "injection": {
+    "executed": false,
+    "reason": "LM Studio unavailable or not requested"
+  }
+}

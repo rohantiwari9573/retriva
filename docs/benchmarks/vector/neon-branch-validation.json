@@ -1,0 +1,88 @@
+{
+ "date": "2026-11-09",
+ "target": "Neon branch retriva-vector-validation of project retriva, created from production; production not connected",
+ "states": {
+  "before": {
+   "select_1": 1,
+   "alembic_version": "6f45bc893ebc",
+   "users": 9,
+   "organizations": 6,
+   "documents": 2,
+   "documents_ready": 1,
+   "document_chunks": 3,
+   "chunks_with_embedding": 3,
+   "conversations": 4,
+   "messages": 30,
+   "embedding_dims": 768,
+   "pgvector": "0.8.6",
+   "server": "18.6 (ac70818)",
+   "ssl_in_use": false,
+   "chunk_indexes": "document_chunks_pkey btree (id) | ix_document_chunks_content_tsv gin (content_tsv) | ix_document_chunks_document_id btree (document_id) | ix_document_chunks_embedding_cosine ivfflat (embedding vector_cosine_ops) WITH (lists='100') | uq_chunk_document_index btree (document_id, chunk_index)"
+  },
+  "after_upgrade": {
+   "select_1": 1,
+   "alembic_version": "b4f2c81d9e37",
+   "users": 9,
+   "organizations": 6,
+   "documents": 2,
+   "documents_ready": 1,
+   "document_chunks": 3,
+   "chunks_with_embedding": 3,
+   "conversations": 4,
+   "messages": 30,
+   "embedding_dims": 768,
+   "pgvector": "0.8.6",
+   "server": "18.6 (ac70818)",
+   "ssl_in_use": false,
+   "chunk_indexes": "document_chunks_pkey btree (id) | ix_document_chunks_content_tsv gin (content_tsv) | ix_document_chunks_document_id btree (document_id) | uq_chunk_document_index btree (document_id, chunk_index)"
+  },
+  "after_downgrade": {
+   "select_1": 1,
+   "alembic_version": "6f45bc893ebc",
+   "users": 9,
+   "organizations": 6,
+   "documents": 2,
+   "documents_ready": 1,
+   "document_chunks": 3,
+   "chunks_with_embedding": 3,
+   "conversations": 4,
+   "messages": 30,
+   "embedding_dims": 768,
+   "pgvector": "0.8.6",
+   "server": "18.6 (ac70818)",
+   "ssl_in_use": false,
+   "chunk_indexes": "document_chunks_pkey btree (id) | ix_document_chunks_content_tsv gin (content_tsv) | ix_document_chunks_document_id btree (document_id) | ix_document_chunks_embedding_cosine ivfflat (embedding vector_cosine_ops) WITH (lists='100') | uq_chunk_document_index btree (document_id, chunk_index)"
+  },
+  "after_reupgrade": {
+   "select_1": 1,
+   "alembic_version": "b4f2c81d9e37",
+   "users": 9,
+   "organizations": 6,
+   "documents": 2,
+   "documents_ready": 1,
+   "document_chunks": 3,
+   "chunks_with_embedding": 3,
+   "conversations": 4,
+   "messages": 30,
+   "embedding_dims": 768,
+   "pgvector": "0.8.6",
+   "server": "18.6 (ac70818)",
+   "ssl_in_use": false,
+   "chunk_indexes": "document_chunks_pkey btree (id) | ix_document_chunks_content_tsv gin (content_tsv) | ix_document_chunks_document_id btree (document_id) | uq_chunk_document_index btree (document_id, chunk_index)"
+  }
+ },
+ "query_check": {
+  "organizations": 1,
+  "queries": 3,
+  "full_result_sets": 3,
+  "exact_order": 3,
+  "cross_tenant_rows": 0,
+  "note": "each READY chunk's embedding used as a query; app VectorRetriever compared with exact cosine ranking computed in Python, before, after and after re-upgrade"
+ },
+ "fresh_database": {
+  "revisions_applied": 5,
+  "final": "b4f2c81d9e37",
+  "ivfflat_present": false,
+  "note": "temporary database on the branch, dropped afterwards"
+ }
+}
