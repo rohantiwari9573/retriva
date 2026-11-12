@@ -257,6 +257,67 @@ async def test_draining_stops_when_the_sender_goes_quiet(monkeypatch) -> None:
     assert sent[0]["status"] == 413
 
 
+async def test_a_body_that_stops_arriving_gets_a_408(monkeypatch) -> None:
+    """uvicorn's receive() has no timeout of its own; the middleware supplies one."""
+    import asyncio
+
+    monkeypatch.setattr("app.core.request_size.BODY_IDLE_SECONDS", 0.05)
+    sent: list[Message] = []
+    calls = 0
+
+    async def receive() -> Message:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"type": "http.request", "body": b'{"a": ', "more_body": True}
+        await asyncio.sleep(3600)
+        raise AssertionError("unreachable")
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await asyncio.wait_for(
+        RequestBodyLimitMiddleware(_app({}), max_bytes=LIMIT)(_raw_scope(500), receive, send),
+        timeout=5,
+    )
+
+    assert sent[0]["status"] == 408
+    assert (b"connection", b"close") in sent[0]["headers"]
+    assert len(sent) == 2  # the 408 alone: whatever the app made of the error is dropped
+
+
+async def test_waiting_for_a_disconnect_after_the_body_is_not_timed(monkeypatch) -> None:
+    """A streamed response listens on receive() for as long as it runs."""
+    import asyncio
+
+    monkeypatch.setattr("app.core.request_size.BODY_IDLE_SECONDS", 0.01)
+    monkeypatch.setattr("app.core.request_size.BODY_MAX_SECONDS", 0.01)
+    calls = 0
+
+    async def receive() -> Message:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.sleep(0.2)
+        return {"type": "http.disconnect"}
+
+    async def inner(scope, receive, send) -> None:
+        await receive()
+        assert await receive() == {"type": "http.disconnect"}
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"done"})
+
+    sent: list[Message] = []
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await RequestBodyLimitMiddleware(inner, max_bytes=LIMIT)(_raw_scope(0), receive, send)
+
+    assert sent[0]["status"] == 200
+
+
 async def test_a_client_waiting_for_100_continue_is_not_asked_for_the_body() -> None:
     """Reading would make the server send 100 Continue and invite the upload."""
     status, consumed = await _run_raw(

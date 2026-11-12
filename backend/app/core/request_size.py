@@ -20,6 +20,12 @@ to a bound in bytes and time. Closing with unread data in the socket makes the
 client's TCP stack reset the connection, and a reset discards the 413 before the
 client reads it. It has to happen first: once a response is complete, uvicorn's
 receive() reports a disconnect instead of more body.
+
+A body within the cap must also arrive in time. uvicorn waits for body bytes with no
+timeout (its keep-alive timeout only runs between requests), and FastAPI reads the
+body before any dependency, so anyone could hold a connection and its request tasks
+by declaring a body and never sending it. A body that stalls or runs past its
+deadline gets a 408 and the connection is closed.
 """
 
 import asyncio
@@ -43,6 +49,13 @@ DRAIN_MAX_SECONDS = 15.0
 # A sender that goes quiet won't finish: a proxy that truncated the body (Next.js
 # past proxyClientMaxBodySize) keeps the original Content-Length and stops sending.
 DRAIN_IDLE_SECONDS = 2.0
+# uvicorn has no body-read timeout: a client that declares a body and stops sending
+# holds the request open until it disconnects. A body must keep arriving (no gap over
+# BODY_IDLE_SECONDS) and finish within its deadline, counted from the request's
+# start. The upload deadline allows a maximum-size upload at about 0.36 Mbit/s.
+BODY_IDLE_SECONDS = 15.0
+BODY_MAX_SECONDS = 30.0
+UPLOAD_BODY_MAX_SECONDS = 600.0
 
 
 def max_request_body_bytes() -> int:
@@ -58,6 +71,10 @@ class _BodyTooLarge(Exception):
     pass
 
 
+class _BodyTimeout(Exception):
+    pass
+
+
 async def _send_too_large(send: Send, *, upload: bool) -> None:
     if upload:
         error = {
@@ -66,11 +83,20 @@ async def _send_too_large(send: Send, *, upload: bool) -> None:
         }
     else:
         error = {"code": "REQUEST_TOO_LARGE", "message": "Request body is too large."}
+    await _send_error(send, 413, error)
+
+
+async def _send_body_timeout(send: Send) -> None:
+    error = {"code": "REQUEST_TIMEOUT", "message": "The request body was not received in time."}
+    await _send_error(send, 408, error)
+
+
+async def _send_error(send: Send, status: int, error: dict[str, str]) -> None:
     body = json.dumps({"error": error}).encode()
     await send(
         {
             "type": "http.response.start",
-            "status": 413,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
@@ -140,12 +166,23 @@ class RequestBodyLimitMiddleware:
 
         received = 0
         exceeded = False
+        timed_out = False
         body_complete = False
         response_started = False
+        body_deadline = time.monotonic() + (UPLOAD_BODY_MAX_SECONDS if upload else BODY_MAX_SECONDS)
 
         async def limited_receive() -> Message:
-            nonlocal received, exceeded, body_complete
-            message = await receive()
+            nonlocal received, exceeded, timed_out, body_complete
+            if body_complete:
+                # Past the body, receive() only reports a disconnect, which a streamed
+                # response waits on for as long as it runs: never time that out.
+                return await receive()
+            wait = min(BODY_IDLE_SECONDS, body_deadline - time.monotonic())
+            try:
+                message = await asyncio.wait_for(receive(), timeout=max(wait, 0))
+            except TimeoutError:
+                timed_out = True
+                raise _BodyTimeout from None
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
                 body_complete = not message.get("more_body", False)
@@ -156,9 +193,9 @@ class RequestBodyLimitMiddleware:
 
         async def guarded_send(message: Message) -> None:
             nonlocal response_started
-            # Once the body is over the cap, whatever the app makes of the error
-            # (FastAPI turns it into a 400) is replaced by the 413 below.
-            if exceeded:
+            # Once the body is over the cap or overdue, whatever the app makes of the
+            # error (FastAPI turns it into a 400) is replaced by the 413 or 408 below.
+            if exceeded or timed_out:
                 return
             if message["type"] == "http.response.start":
                 response_started = True
@@ -167,8 +204,14 @@ class RequestBodyLimitMiddleware:
         try:
             await self.app(scope, limited_receive, guarded_send)
         except Exception:
-            if not exceeded:
+            if not (exceeded or timed_out):
                 raise
+        if timed_out:
+            # The sender has stalled, so there is nothing to drain; "connection: close"
+            # makes the server drop the connection once the 408 is written.
+            if not response_started:
+                await _send_body_timeout(send)
+            return
         # If the app had already started a response before the body went over the
         # cap, the rest of that response is dropped and no 413 can be sent; no route
         # reads its body after responding, so this is a guard, not a path in use.
