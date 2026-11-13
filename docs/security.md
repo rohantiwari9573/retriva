@@ -168,8 +168,11 @@ by this review.
   (`app/services/file_validation.py`), not trusted by extension or
   `Content-Type` header. Extension/content mismatch is rejected (422).
   IMPLEMENTED, TESTED.
-- Size is bounded (`MAX_DOCUMENT_SIZE_MB`, default 25MB) by counting bytes
-  as they stream in, never trusting `Content-Length` or `UploadFile.size`.
+- Size is bounded (`MAX_DOCUMENT_SIZE_MB`, default 25MB) by counting the
+  file's bytes in `DocumentService._read_and_hash`, never trusting
+  `Content-Length` or `UploadFile.size`. That check only runs once Starlette
+  has parsed the multipart body, so the body itself is capped earlier: see
+  [Request body limits and timeouts](#request-body-limits-and-timeouts).
   IMPLEMENTED, TESTED.
 - Exact-duplicate content is rejected at the application level
   (`get_by_content_hash` pre-check) **and** at the database level
@@ -184,6 +187,53 @@ by this review.
   (`test_duplicate_content_race_maps_to_409_not_500`) - this proves the
   constraint-violation code path, not genuinely concurrent HTTP requests.
 - Rate limiting on upload: see [Rate limiting](#rate-limiting).
+
+## Request body limits and timeouts
+
+FastAPI reads a request body before it runs any dependency, so authentication
+and rate limits can't protect against the body itself. Before this was in
+place, one unauthenticated 300 MB JSON request took the API from 118 MiB to
+1.07 GiB of memory, a 300 MB multipart request spooled 264 MB to disk before
+its 401, and a client could hold a request open indefinitely by declaring a
+body and not sending it. `RequestBodyLimitMiddleware`
+(`app/core/request_size.py`) enforces, for every HTTP request:
+
+| Limit | Value | Response |
+|---|---|---|
+| Body size, `POST /api/v1/organizations/{id}/documents` | `MAX_DOCUMENT_SIZE_MB` + 1 MiB of multipart framing | 413 `FILE_TOO_LARGE` |
+| Body size, every other request | 1 MiB (`DEFAULT_MAX_BODY_BYTES`) | 413 `REQUEST_TOO_LARGE` |
+| Gap between body reads | 15 s (`BODY_IDLE_SECONDS`) | 408 `REQUEST_TIMEOUT` |
+| Whole body, from the start of the request | 30 s (`BODY_MAX_SECONDS`); 600 s for the upload route (`UPLOAD_BODY_MAX_SECONDS`) | 408 `REQUEST_TIMEOUT` |
+
+- **How sizes are enforced:**
+  - A declared `Content-Length` over the cap is refused without reading.
+  - A chunked body is counted as it arrives.
+  - The rest of a refused body is discarded (at most 64 MiB, 15 s, or 2 s
+    without data) before the 413, so the client sees it rather than a reset.
+  - A client sending `Expect: 100-continue` is refused without being asked for
+    its body.
+- **What the timeouts cover:** a body that stops arriving, or trickles past its
+  deadline, gets a 408 with `connection: close`. Once the body is complete,
+  nothing is timed, so streamed chat responses may run and pause freely.
+  Starlette closes spooled upload files when the read fails, so a timed-out
+  upload leaves no temp file.
+- **Operational implications:**
+  - The upload deadline allows a maximum-size upload at about 0.36 Mbit/s.
+    Slower clients can't upload a 25 MB file.
+  - The values are constants in `app/core/request_size.py`, not environment
+    settings. Changing them is a code change.
+- **Not covered here:** uvicorn sets no timeout on a connection before its
+  request headers are complete, and its keep-alive timeout only runs between
+  requests (measured: `--timeout-keep-alive 5` left an idle connection and one
+  with incomplete headers open past 20 s, with both httptools and h11). Those
+  can only be bounded in front of the app, by the hosting platform's proxy or
+  a reverse proxy. Every request that reaches the app is bounded by the limits
+  above.
+
+IMPLEMENTED, TESTED (`tests/unit/test_request_size_limit.py`,
+`tests/integration/test_request_size_limit.py`, and
+`tests/integration/test_request_body_timeout.py`, which runs a real uvicorn
+server over raw sockets).
 
 ## Document parser hardening (new in Phase 7)
 
