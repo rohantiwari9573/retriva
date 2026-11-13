@@ -280,3 +280,127 @@ async def test_api_schema_check_rejects_the_previous_production_revision(
 
     with pytest.raises(SchemaNotMigratedError, match=PREVIOUS_REVISION):
         await _check_schema(fresh_database)
+
+
+# --- the migration step killed mid-run -----------------------------------------
+
+
+def _wait_for_lock_wait(database: str, timeout: float = 30.0) -> None:
+    """Until a session in `database` is waiting on a lock, i.e. the step is mid-run."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        waiting = _query(
+            database,
+            "SELECT count(*) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )[0][0]
+        if waiting:
+            return
+        time.sleep(0.05)
+    raise AssertionError("the migration step never reached the blocked statement")
+
+
+def _advisory_locks(database: str) -> int:
+    return _query(
+        database,
+        "SELECT count(*) FROM pg_locks l JOIN pg_database d ON d.oid = l.database "
+        "WHERE l.locktype = 'advisory' AND d.datname = current_database()",
+    )[0][0]
+
+
+def _kill(process: subprocess.Popen[str]) -> None:
+    process.kill()  # SIGKILL: no cleanup, no rollback from the client side
+    process.communicate(timeout=30)
+
+
+def _wait_until(condition, what: str, timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError(f"timed out waiting for {what}")
+        time.sleep(0.05)
+
+
+def test_killed_migration_step_applies_nothing_and_releases_its_lock(
+    fresh_database: str,
+) -> None:
+    """The production path (6f45bc893ebc -> head), killed while it waits on a table lock."""
+    _upgrade_to(fresh_database, PREVIOUS_REVISION)
+    conninfo = _database_url(fresh_database).replace("postgresql+asyncpg://", "postgresql://")
+
+    with psycopg.connect(conninfo) as blocker:
+        blocker.execute("LOCK TABLE document_chunks IN ACCESS SHARE MODE")
+        process = _migrate_process(_database_url(fresh_database))
+        _wait_for_lock_wait(fresh_database)
+        assert _advisory_locks(fresh_database) == 1  # the step holds the runner lock
+        _kill(process)
+        blocker.rollback()
+
+    # The server notices the dead client, rolls its transaction back and frees the lock.
+    _wait_until(lambda: _advisory_locks(fresh_database) == 0, "the advisory lock to be freed")
+    assert _revision_and_index(fresh_database) == (PREVIOUS_REVISION, True)
+
+    code, output = _run_migrate(_database_url(fresh_database))
+
+    assert code == EXIT_OK, output
+    assert _revision_and_index(fresh_database) == (expected_head(), False)
+
+
+def test_killed_multi_revision_upgrade_leaves_no_partial_revision(fresh_database: str) -> None:
+    """All pending revisions run in one transaction: killed part-way through, even the
+    statements that already ran (here CREATE EXTENSION vector) are rolled back."""
+    start = "31c50429804f"  # documents exist; the next revision alters them
+    _upgrade_to(fresh_database, start)
+    conninfo = _database_url(fresh_database).replace("postgresql+asyncpg://", "postgresql://")
+    had_vector = _query(
+        fresh_database, "SELECT count(*) FROM pg_extension WHERE extname = 'vector'"
+    )[0][0]
+    assert had_vector == 0  # so finding it absent afterwards proves the rollback
+
+    with psycopg.connect(conninfo) as blocker:
+        blocker.execute("LOCK TABLE documents IN ACCESS EXCLUSIVE MODE")
+        process = _migrate_process(_database_url(fresh_database))
+        _wait_for_lock_wait(fresh_database)
+        _kill(process)
+        blocker.rollback()
+
+    _wait_until(lambda: _advisory_locks(fresh_database) == 0, "the advisory lock to be freed")
+    assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [(start,)]
+    assert _query(fresh_database, "SELECT to_regclass('document_chunks') IS NULL")[0][0]
+    columns = {
+        row[0]
+        for row in _query(
+            fresh_database,
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'documents'",
+        )
+    }
+    assert "failure_reason" not in columns
+    assert (
+        _query(fresh_database, "SELECT count(*) FROM pg_extension WHERE extname = 'vector'")[0][0]
+        == had_vector
+    )
+
+    code, output = _run_migrate(_database_url(fresh_database))
+
+    assert code == EXIT_OK, output
+    assert _revision_and_index(fresh_database) == (expected_head(), False)
+
+
+def test_all_pending_revisions_run_in_one_transaction() -> None:
+    """What makes an interrupted multi-revision upgrade all-or-nothing. A switch to
+    transaction_per_migration would let a kill leave earlier revisions applied."""
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "base:head", "--sql"],
+        cwd=BACKEND_ROOT,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    statements = [line.strip() for line in result.stdout.splitlines()]
+
+    assert statements.count("BEGIN;") == 1
+    assert statements.count("COMMIT;") == 1
+    assert sum("INSERT INTO alembic_version" in line for line in statements) == 1
