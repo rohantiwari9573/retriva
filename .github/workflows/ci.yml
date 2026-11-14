@@ -44,7 +44,37 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -c constraints.txt -e ".[dev]"
+
+      - name: Every installed dependency is pinned
+        # A new or changed dependency must come with a constraints.txt update.
+        run: |
+          python - <<'PY'
+          import re
+          from importlib.metadata import distributions
+
+          def norm(name):
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+          pins = {}
+          for line in open("constraints.txt"):
+              line = line.split("#")[0].strip()
+              if line:
+                  name, _, version = line.partition("==")
+                  pins[norm(name)] = version
+          ignored = {"nexus", "nexus-backend", "retriva", "pip", "setuptools", "wheel"}
+          problems = []
+          for dist in distributions():
+              name = norm(dist.metadata["Name"])
+              if name in ignored:
+                  continue
+              if name not in pins:
+                  problems.append(f"{name}=={dist.version} is installed but not pinned")
+              elif pins[name] != dist.version:
+                  problems.append(f"{name} is {dist.version}, pinned {pins[name]}")
+          print("\n".join(problems) or f"all {len(pins)} pins match")
+          raise SystemExit(1 if problems else 0)
+          PY
 
       - name: Lint (ruff)
         run: ruff check app tests
