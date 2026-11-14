@@ -9,9 +9,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     // Next buffers request bodies when a proxy file exists, even on paths it does
-    // not match, and past this limit a proxied upload hangs and then fails. Must
-    // stay above the API limit, MAX_DOCUMENT_SIZE_MB (25), plus multipart overhead.
-    proxyClientMaxBodySize: "26mb",
+    // not match, and silently cuts a body off at this limit. It must stay above
+    // the API's own cap (max_request_body_bytes: MAX_DOCUMENT_SIZE_MB (25) MiB plus
+    // 1 MiB multipart overhead = 26 MiB), so an oversized upload always reaches the
+    // API intact enough for it to answer 413. At exactly 26mb a chunked upload was
+    // cut to the cap and answered 422 instead. See src/lib/next-config.test.ts.
+    proxyClientMaxBodySize: "27mb",
   },
   // Proxy mode: API calls go to relative /api/* paths on this origin.
   ...(apiProxyTarget && !process.env.NEXT_PUBLIC_API_URL

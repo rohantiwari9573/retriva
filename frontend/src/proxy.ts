@@ -16,9 +16,10 @@ const AUTH_PAGES = ["/login", "/register"];
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // The auth routes are the only proxied API calls limited per IP. Keeping the
-  // matcher to these small JSON requests also keeps uploads and SSE streams out
-  // of this layer, which buffers request bodies.
+  // The auth routes are the only proxied API calls limited per IP, so only they
+  // get a signed client-IP assertion. The narrow matcher does not keep other
+  // bodies out of buffering: once a proxy file exists Next buffers every request
+  // body up to experimental.proxyClientMaxBodySize (see next.config.ts).
   if (pathname.startsWith("/api/")) {
     const headers = await withClientIpAssertion(request.headers, {
       secret: process.env.EDGE_PROXY_SHARED_SECRET,
