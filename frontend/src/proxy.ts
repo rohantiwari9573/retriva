@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { withClientIpAssertion } from "@/lib/client-ip-assertion";
+import { forwardedApiHeaders } from "@/lib/proxy-headers";
 
 /**
  * Presence-only check: middleware runs server-side and CAN read httpOnly
@@ -16,16 +17,20 @@ const AUTH_PAGES = ["/login", "/register"];
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // The auth routes are the only proxied API calls limited per IP, so only they
-  // get a signed client-IP assertion. The narrow matcher does not keep other
-  // bodies out of buffering: once a proxy file exists Next buffers every request
-  // body up to experimental.proxyClientMaxBodySize (see next.config.ts).
+  // Every proxied API call drops Expect (see forwardedApiHeaders). The auth routes
+  // are the only ones limited per IP, so only they get a signed client-IP
+  // assertion. Running here doesn't add buffering: once a proxy file exists Next
+  // buffers every request body up to experimental.proxyClientMaxBodySize anyway
+  // (see next.config.ts), and responses, including SSE streams, pass through.
   if (pathname.startsWith("/api/")) {
-    const headers = await withClientIpAssertion(request.headers, {
-      secret: process.env.EDGE_PROXY_SHARED_SECRET,
-      onVercel: process.env.VERCEL === "1",
-      nowSeconds: Math.floor(Date.now() / 1000),
-    });
+    const forwarded = forwardedApiHeaders(request.headers);
+    const headers = pathname.startsWith("/api/v1/auth/")
+      ? await withClientIpAssertion(forwarded, {
+          secret: process.env.EDGE_PROXY_SHARED_SECRET,
+          onVercel: process.env.VERCEL === "1",
+          nowSeconds: Math.floor(Date.now() / 1000),
+        })
+      : forwarded;
     return NextResponse.next({ request: { headers } });
   }
 
@@ -47,5 +52,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*", "/chat/:path*", "/documents/:path*", "/admin/:path*", "/login", "/register", "/api/v1/auth/:path*"],
+  matcher: ["/dashboard/:path*", "/settings/:path*", "/chat/:path*", "/documents/:path*", "/admin/:path*", "/login", "/register", "/api/:path*"],
 };

@@ -328,13 +328,18 @@ async def test_a_client_waiting_for_100_continue_is_not_asked_for_the_body() -> 
     assert consumed == 0
 
 
-async def test_a_body_too_large_to_drain_is_refused_without_reading_it(monkeypatch) -> None:
+async def test_a_body_declared_past_the_drain_bound_is_drained_only_up_to_it(
+    monkeypatch,
+) -> None:
+    """A truncating proxy (Next.js) forwards the original Content-Length, say 100 MiB,
+    but only sends its own limit. Refusing that without reading made the proxy hit a
+    write reset and answer 500, so it is drained too, within the same byte bound."""
     monkeypatch.setattr("app.core.request_size.DRAIN_MAX_BYTES", 2000)
 
     status, consumed = await _run_raw(content_length=10**9, chunks=10**6)
 
     assert status == 413
-    assert consumed == 0
+    assert 0 < consumed <= 2000 // 500 + 2
 
 
 async def test_app_errors_on_bodies_within_the_cap_still_propagate() -> None:

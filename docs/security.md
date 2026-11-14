@@ -41,7 +41,7 @@ two real test users/organizations created and cleaned up afterward.
 | Oversized field value (100,000-char org name) | Clean `VALIDATION_ERROR` citing the 255-char limit, no crash |
 | Malformed UUID path parameter | Clean `VALIDATION_ERROR`, no crash |
 | SQL-injection-style organization name (`Robert'; DROP TABLE organizations;--`) | Stored as a literal string via SQLAlchemy's parameterized queries; table confirmed intact and queryable afterward - no injection occurred |
-| `openapi.json` / `/docs` content | No secrets, credentials, or internal paths found in the schema |
+| `openapi.json` / `/docs` content | No secrets, credentials, or internal paths found in the schema. Production serves neither: the schema maps every route and model, and nothing in production consumes it |
 | Security headers on a real API response | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` all present |
 
 **Caveat**: the path-traversal-via-filename test could not be cleanly
@@ -210,8 +210,14 @@ body and not sending it. `RequestBodyLimitMiddleware`
   - A chunked body is counted as it arrives.
   - The rest of a refused body is discarded (at most 64 MiB, 15 s, or 2 s
     without data) before the 413, so the client sees it rather than a reset.
+    This applies whatever size is declared: a proxy that truncated the body keeps
+    the original Content-Length, and closing on it mid-write made Next.js answer
+    500 instead of passing the 413 on.
   - A client sending `Expect: 100-continue` is refused without being asked for
-    its body.
+    its body. The Next.js proxy drops that header before forwarding (it has
+    already answered it and buffered the body), so a proxied upload is always
+    drained and gets its 413. Through the proxy, 26, 40 and 100 MiB uploads,
+    with and without `Expect` and chunked, got 413 in 92 of 92 tries.
 - **What the timeouts cover:** a body that stops arriving, or trickles past its
   deadline, gets a 408 with `connection: close`. Once the body is complete,
   nothing is timed, so streamed chat responses may run and pause freely.

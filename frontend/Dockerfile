@@ -19,6 +19,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # CI - which never pass this build arg - see no behavior change.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Proxy mode (next.config.ts): /api/* is rewritten to this origin, baked in at build
+# like on Vercel. Empty by default, so local and CI builds are unchanged; CI's
+# fresh-start job sets it to test uploads through the real proxy.
+ARG API_PROXY_TARGET=
+ENV API_PROXY_TARGET=$API_PROXY_TARGET
 RUN npm run build
 
 FROM base AS runtime

@@ -139,6 +139,16 @@ jobs:
             test "$(docker inspect -f '{{.State.Health.Status}}' "$container")" = "healthy"
           done
 
+      - name: Oversized uploads through the frontend proxy get 413
+        # The frontend is built in proxy mode, as on Vercel, and probed from inside
+        # the network: 26-100 MiB bodies, with and without Expect: 100-continue and
+        # chunked, must all be refused with 413, never a proxy 500.
+        run: |
+          compose="docker compose -f docker-compose.yml -f docker-compose.isolated.yml"
+          $compose build --build-arg API_PROXY_TARGET=http://backend:8000 frontend
+          $compose up -d --no-deps frontend
+          $compose exec -T backend sh scripts/upload_limit_probe.sh http://frontend:3000
+
       - name: Show logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml -f docker-compose.isolated.yml logs --tail 100
