@@ -28,8 +28,12 @@ from app.core.logging import configure_logging, get_logger
 from app.core.migrations import (
     EXIT_DATABASE_UNAVAILABLE,
     EXIT_DESTRUCTIVE_REFUSED,
+    EXIT_LOCK_TIMEOUT,
     EXIT_MIGRATION_FAILED,
+    EXIT_MIGRATIONS_PENDING,
     EXIT_OK,
+    EXIT_UNKNOWN_REVISION,
+    accepted_newer_revisions,
     alembic_config,
     destructive_operations,
     expected_head,
@@ -57,6 +61,26 @@ def _connect_with_retry(engine, wait_seconds: float) -> Connection | None:
             delay = min(delay * 2, 5.0)
 
 
+def _acquire_lock(connection: Connection, wait_seconds: float) -> bool:
+    """Takes the runner lock, waiting at most wait_seconds for another runner to
+    finish. pg_advisory_lock would wait forever behind a wedged runner, and a --check
+    queued behind a migration would hang a deploy script with it."""
+    deadline = time.monotonic() + wait_seconds
+    logged = False
+    while True:
+        acquired = connection.execute(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": _MIGRATION_LOCK_KEY}
+        ).scalar()
+        if acquired:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        if not logged:
+            logger.info("migration_waiting_for_lock", wait_seconds=wait_seconds)
+            logged = True
+        time.sleep(min(0.5, max(deadline - time.monotonic(), 0)))
+
+
 def _current_revision(connection: Connection) -> str | None:
     return MigrationContext.configure(connection).get_current_revision()
 
@@ -79,7 +103,13 @@ def _pending_destructive_operations(current: str | None) -> dict[str, list[str]]
     return findings
 
 
-def run(*, allow_destructive: bool, check_only: bool, wait_seconds: float) -> int:
+def run(
+    *,
+    allow_destructive: bool,
+    check_only: bool,
+    wait_seconds: float,
+    lock_wait_seconds: float = 300.0,
+) -> int:
     engine = create_engine(
         sync_database_url(settings.DATABASE_URL),
         poolclass=NullPool,
@@ -92,9 +122,9 @@ def run(*, allow_destructive: bool, check_only: bool, wait_seconds: float) -> in
     head = expected_head()
     try:
         with connection.execution_options(isolation_level="AUTOCOMMIT") as lock_connection:
-            lock_connection.execute(
-                text("SELECT pg_advisory_lock(:key)"), {"key": _MIGRATION_LOCK_KEY}
-            )
+            if not _acquire_lock(lock_connection, lock_wait_seconds):
+                logger.error("migration_lock_timeout", wait_seconds=lock_wait_seconds)
+                return EXIT_LOCK_TIMEOUT
             current = _current_revision(lock_connection)
             logger.info("migration_state", current=current, target=head)
 
@@ -102,12 +132,16 @@ def run(*, allow_destructive: bool, check_only: bool, wait_seconds: float) -> in
                 logger.info("migration_nothing_to_do", revision=head)
                 return EXIT_OK
 
-            # A revision this build doesn't know means the database is newer, as after
-            # rolling the code back. Nothing here can be applied, and the API's startup
-            # check accepts this state too, so it isn't a failure.
+            # A revision this build doesn't know: nothing here can be applied. It is
+            # expected only while rolled back past a migration, which the operator
+            # declares in SCHEMA_ACCEPT_NEWER_REVISIONS (the API's startup check uses
+            # the same list); anything else is refused rather than passed as healthy.
             if _is_unknown_revision(current):
-                logger.warning("migration_database_newer", current=current, target=head)
-                return EXIT_OK
+                if current in accepted_newer_revisions():
+                    logger.warning("migration_database_newer", current=current, target=head)
+                    return EXIT_OK
+                logger.error("migration_unknown_revision", current=current, target=head)
+                return EXIT_UNKNOWN_REVISION
 
             destructive = _pending_destructive_operations(current)
             if destructive and not allow_destructive:
@@ -115,7 +149,7 @@ def run(*, allow_destructive: bool, check_only: bool, wait_seconds: float) -> in
                 return EXIT_DESTRUCTIVE_REFUSED
             if check_only:
                 logger.info("migration_pending", current=current, target=head)
-                return EXIT_OK
+                return EXIT_MIGRATIONS_PENDING
 
             command.upgrade(alembic_config(), "head")
 
@@ -145,6 +179,7 @@ def main() -> int:
         allow_destructive=args.allow_destructive,
         check_only=args.check,
         wait_seconds=float(os.environ.get("MIGRATE_DB_WAIT_SECONDS", "60")),
+        lock_wait_seconds=float(os.environ.get("MIGRATE_LOCK_WAIT_SECONDS", "300")),
     )
 
 

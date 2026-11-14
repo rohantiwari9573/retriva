@@ -121,6 +121,30 @@ still be wrong, and the startup check would no longer catch it.
 A migration that destroys data is refused with exit code 2. Pass `--allow-destructive`
 only after reviewing it, and only with a current backup.
 
+Exit codes of `python -m scripts.migrate`:
+
+| Code | Meaning |
+|---|---|
+| 0 | Database at head (or, with `--check`, nothing to do) |
+| 1 | A migration failed; nothing from the failed run is kept |
+| 2 | A pending migration destroys data and `--allow-destructive` wasn't given |
+| 3 | The database didn't answer within `MIGRATE_DB_WAIT_SECONDS` |
+| 4 | `--check` only: migrations are pending |
+| 5 | Another runner held the migration lock past `MIGRATE_LOCK_WAIT_SECONDS` (default 300) |
+| 6 | The database is at a revision this build doesn't know (see rollbacks below) |
+
+A deploy script can gate on `--check`: anything but 0 means don't deploy yet.
+
+### Rolling back past a migration
+
+The API refuses to start, and the migration step exits 6, on a database revision the
+code doesn't know, because outside a rollback that means something is wrong (a mistyped
+`alembic stamp`, a database from another branch). During a rollback it is expected, so
+declare it: set `SCHEMA_ACCEPT_NEWER_REVISIONS` to the newer revision (from
+`SELECT version_num FROM alembic_version`) on the API before deploying the older code,
+and remove it once the newer code is deployed again. Migrations stay backward compatible
+with the previous release, which is what makes running the old code on it safe.
+
 ### First deploy of the startup schema check
 
 The API now refuses to start if the database is behind the code. Before any merge, check
@@ -130,8 +154,10 @@ production against the code you're about to deploy. This changes nothing:
 docker compose run --rm --no-deps -e DATABASE_URL="<production direct url>" migrate python -m scripts.migrate --check
 ```
 
-Look for `migration_nothing_to_do`. If it reports `migration_pending`, run the migration
-steps above first. Don't rely on a fixed revision: it changes as migrations are added.
+Exit code 0 (`migration_nothing_to_do`) means it is safe to merge. Exit code 4
+(`migration_pending`) means run the migration steps above first; 6 means production is at
+a revision this code doesn't know, so stop and find out why. Don't rely on a fixed
+revision: it changes as migrations are added.
 
 ### Client IP behind Vercel
 
@@ -182,6 +208,11 @@ enabling it: a wrong setting would let clients choose their own rate-limit ident
 | `RATE_LIMIT_REDIS_RETRY_SECONDS` | API | 5 | How often Redis is retried while down |
 | `RATE_LIMIT_FALLBACK_MAX_KEYS` | API | 10000 | Memory bound of the fallback |
 | `MIGRATE_DB_WAIT_SECONDS` | Migration step | 60 | How long to wait for the database |
+| `MIGRATE_LOCK_WAIT_SECONDS` | Migration step | 300 | How long to wait for another runner's lock |
+| `SCHEMA_ACCEPT_NEWER_REVISIONS` | API and migration step | empty | Newer revisions to accept, only while rolled back |
+
+Also new in R0: production serves no `/openapi.json` (and no `/docs`, as before); and
+`backend/constraints.txt` pins every backend dependency for Docker builds and CI.
 
 ### Cost
 

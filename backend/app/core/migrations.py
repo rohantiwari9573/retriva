@@ -15,10 +15,18 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+
 EXIT_OK = 0
 EXIT_MIGRATION_FAILED = 1
 EXIT_DESTRUCTIVE_REFUSED = 2
 EXIT_DATABASE_UNAVAILABLE = 3
+# --check only: the database is behind and `scripts.migrate` would change it.
+EXIT_MIGRATIONS_PENDING = 4
+# Another runner held the migration lock past MIGRATE_LOCK_WAIT_SECONDS.
+EXIT_LOCK_TIMEOUT = 5
+# The database is at a revision this build doesn't know and wasn't told to accept.
+EXIT_UNKNOWN_REVISION = 6
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,7 +39,20 @@ _DESTRUCTIVE_SQL = re.compile(
 
 
 class SchemaNotMigratedError(RuntimeError):
-    """The database schema is behind what this build of the code requires."""
+    """The database schema is behind what this build of the code requires, or at a
+    revision it doesn't know and wasn't told to accept."""
+
+
+def accepted_newer_revisions() -> set[str]:
+    """Revisions this build doesn't know but may run on: SCHEMA_ACCEPT_NEWER_REVISIONS.
+
+    A revision the code doesn't recognize is normal just after rolling the app back
+    past a migration, and abnormal otherwise (a mistyped `alembic stamp`, a database
+    from another branch). Telling them apart needs the operator, so an unknown
+    revision is refused unless it is named here, for the duration of the rollback.
+    """
+    raw = settings.SCHEMA_ACCEPT_NEWER_REVISIONS
+    return {part.strip() for part in raw.split(",") if part.strip()}
 
 
 def alembic_config() -> Config:
@@ -90,9 +111,10 @@ def destructive_operations(migration_source: str) -> list[str]:
 async def assert_schema_is_current(session: AsyncSession) -> None:
     """Refuse to serve traffic on a schema older than this code expects.
 
-    A revision this build doesn't recognize means the database is newer, which
-    is the normal state just after rolling the app back, so that is allowed:
-    migrations are written to stay compatible with the previous release.
+    A revision this build doesn't recognize is accepted only if it is listed in
+    SCHEMA_ACCEPT_NEWER_REVISIONS: that is how a rollback past a migration runs on the
+    newer schema (migrations are written to stay compatible with the previous
+    release), without also accepting an arbitrary or mistyped revision.
     """
     script = ScriptDirectory.from_config(alembic_config())
     head = script.get_current_head()
@@ -111,4 +133,11 @@ async def assert_schema_is_current(session: AsyncSession) -> None:
     if current in known:
         raise SchemaNotMigratedError(
             f"Database is at revision {current} but this build requires {head}. {hint}"
+        )
+    if current not in accepted_newer_revisions():
+        raise SchemaNotMigratedError(
+            f"Database is at revision {current}, which this build doesn't know. If this "
+            "is a rollback past a migration, set SCHEMA_ACCEPT_NEWER_REVISIONS="
+            f"{current} until the newer code is deployed again; otherwise find out how "
+            "the database got there before serving traffic."
         )

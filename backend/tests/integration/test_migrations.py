@@ -21,8 +21,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.config import settings
 from app.core.migrations import (
     EXIT_DATABASE_UNAVAILABLE,
+    EXIT_LOCK_TIMEOUT,
     EXIT_MIGRATION_FAILED,
+    EXIT_MIGRATIONS_PENDING,
     EXIT_OK,
+    EXIT_UNKNOWN_REVISION,
     SchemaNotMigratedError,
     assert_schema_is_current,
     expected_head,
@@ -181,21 +184,61 @@ def _mark_as_newer(database: str) -> None:
         connection.execute("INSERT INTO alembic_version VALUES ('a_future_revision')")
 
 
-async def test_api_schema_check_tolerates_a_newer_database(fresh_database: str) -> None:
-    """Rolling the app back after a forward migration must not block boot."""
+async def test_api_schema_check_rejects_an_unknown_revision(fresh_database: str) -> None:
+    """A mistyped `alembic stamp` or another branch's database must not be served."""
     _mark_as_newer(fresh_database)
+
+    with pytest.raises(SchemaNotMigratedError, match="SCHEMA_ACCEPT_NEWER_REVISIONS"):
+        await _check_schema(fresh_database)
+
+
+async def test_api_schema_check_accepts_a_declared_newer_revision(
+    fresh_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rolling the app back after a forward migration must not block boot, once the
+    operator names the newer revision."""
+    _mark_as_newer(fresh_database)
+    monkeypatch.setattr(settings, "SCHEMA_ACCEPT_NEWER_REVISIONS", "other, a_future_revision")
 
     await _check_schema(fresh_database)
 
 
+async def test_api_schema_check_still_rejects_a_revision_not_on_the_list(
+    fresh_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mark_as_newer(fresh_database)
+    monkeypatch.setattr(settings, "SCHEMA_ACCEPT_NEWER_REVISIONS", "a_different_revision")
+
+    with pytest.raises(SchemaNotMigratedError, match="a_future_revision"):
+        await _check_schema(fresh_database)
+
+
 @pytest.mark.parametrize("args", [(), ("--check",)])
-def test_migrate_tolerates_a_newer_database(fresh_database: str, args: tuple[str, ...]) -> None:
-    """Found against a Neon branch already carrying a later migration: the runner
-    raised on the unknown revision, so the migrate service would have blocked the
-    API even though the API's own check accepts this state."""
+def test_migrate_refuses_an_unknown_revision(fresh_database: str, args: tuple[str, ...]) -> None:
+    """It used to exit 0 here, so a deploy would go ahead on a database the code
+    couldn't vouch for. Now it is a distinct failure and nothing is changed."""
     _mark_as_newer(fresh_database)
 
     code, output = _run_migrate(_database_url(fresh_database), *args)
+
+    assert code == EXIT_UNKNOWN_REVISION, output
+    assert "migration_unknown_revision" in output
+    assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [
+        ("a_future_revision",)
+    ]
+
+
+@pytest.mark.parametrize("args", [(), ("--check",)])
+def test_migrate_accepts_a_declared_newer_revision(
+    fresh_database: str, args: tuple[str, ...]
+) -> None:
+    """Found against a Neon branch already carrying a later migration: during a
+    rollback the migrate service must not block the API, which accepts the same list."""
+    _mark_as_newer(fresh_database)
+
+    code, output = _run_migrate(
+        _database_url(fresh_database), *args, SCHEMA_ACCEPT_NEWER_REVISIONS="a_future_revision"
+    )
 
     assert code == EXIT_OK, output
     assert "migration_database_newer" in output
@@ -232,10 +275,25 @@ def test_migration_check_reports_the_vector_migration_as_pending(fresh_database:
 
     code, output = _run_migrate(_database_url(fresh_database), "--check")
 
-    assert code == EXIT_OK, output
+    # Not 0: a script gating a deploy on --check must see that work is pending.
+    assert code == EXIT_MIGRATIONS_PENDING, output
     assert "migration_pending" in output
     assert "migration_refused_destructive" not in output
     assert _revision_and_index(fresh_database) == (PREVIOUS_REVISION, True)
+
+
+def test_migration_check_at_head_exits_zero_and_pending_on_an_empty_database(
+    fresh_database: str,
+) -> None:
+    url = _database_url(fresh_database)
+    assert _run_migrate(url, "--check")[0] == EXIT_MIGRATIONS_PENDING  # nothing applied yet
+    assert _query(fresh_database, "SELECT to_regclass('alembic_version') IS NULL")[0][0]
+
+    assert _run_migrate(url)[0] == EXIT_OK
+    code, output = _run_migrate(url, "--check")
+
+    assert code == EXIT_OK, output
+    assert "migration_nothing_to_do" in output
 
 
 def test_migration_step_upgrades_the_previous_production_revision(fresh_database: str) -> None:
@@ -444,3 +502,82 @@ def test_all_pending_revisions_run_in_one_transaction() -> None:
     assert statements.count("BEGIN;") == 1
     assert statements.count("COMMIT;") == 1
     assert sum("INSERT INTO alembic_version" in line for line in statements) == 1
+
+
+# --- waiting for the runner lock is bounded -----------------------------------
+
+
+def _hold_runner_lock(database: str) -> psycopg.Connection:
+    """A session holding the runner lock, as a wedged or slow runner would."""
+    from scripts.migrate import _MIGRATION_LOCK_KEY
+
+    conninfo = _database_url(database).replace("postgresql+asyncpg://", "postgresql://")
+    holder = psycopg.connect(conninfo, autocommit=True)
+    holder.execute("SELECT pg_advisory_lock(%s)", (_MIGRATION_LOCK_KEY,))
+    return holder
+
+
+@pytest.mark.parametrize("args", [(), ("--check",)])
+def test_a_held_runner_lock_times_out_with_its_own_exit_code(
+    fresh_database: str, args: tuple[str, ...]
+) -> None:
+    """pg_advisory_lock used to wait forever, so a deploy script running --check
+    behind a wedged runner hung with it."""
+    holder = _hold_runner_lock(fresh_database)
+    try:
+        started = time.monotonic()
+        code, output = _run_migrate(
+            _database_url(fresh_database), *args, MIGRATE_LOCK_WAIT_SECONDS="2"
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        holder.close()
+
+    assert code == EXIT_LOCK_TIMEOUT, output
+    assert "migration_lock_timeout" in output
+    assert elapsed < 30
+    assert _query(fresh_database, "SELECT to_regclass('alembic_version') IS NULL")[0][0]
+
+
+def test_a_runner_waiting_for_the_lock_proceeds_once_it_is_released(
+    fresh_database: str,
+) -> None:
+    holder = _hold_runner_lock(fresh_database)
+    process = _migrate_process(_database_url(fresh_database), MIGRATE_LOCK_WAIT_SECONDS="60")
+    try:
+        time.sleep(2)  # well inside the wait: the runner is polling for the lock
+        assert process.poll() is None
+        assert _query(fresh_database, "SELECT to_regclass('alembic_version') IS NULL")[0][0]
+    finally:
+        holder.close()  # the other runner finishes
+
+    output, _ = process.communicate(timeout=120)
+
+    assert process.returncode == EXIT_OK, output
+    assert "migration_waiting_for_lock" in output
+    assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [
+        (expected_head(),)
+    ]
+
+
+def test_a_runner_killed_while_waiting_changes_nothing_and_a_rerun_recovers(
+    fresh_database: str,
+) -> None:
+    holder = _hold_runner_lock(fresh_database)
+    try:
+        process = _migrate_process(_database_url(fresh_database), MIGRATE_LOCK_WAIT_SECONDS="60")
+        time.sleep(2)
+        _kill(process)
+        # The holder's lock is untouched, and the killed waiter applied nothing.
+        assert _advisory_locks(fresh_database) == 1
+        assert _query(fresh_database, "SELECT to_regclass('alembic_version') IS NULL")[0][0]
+    finally:
+        holder.close()
+
+    _wait_until(lambda: _advisory_locks(fresh_database) == 0, "the advisory lock to be freed")
+    code, output = _run_migrate(_database_url(fresh_database))
+
+    assert code == EXIT_OK, output
+    assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [
+        (expected_head(),)
+    ]

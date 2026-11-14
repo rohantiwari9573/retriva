@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = Field(...)
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 5
+    # Comma-separated revisions newer than this build that the API and migration step
+    # may run on. Set only while rolled back past a migration (see DEPLOYMENT.md);
+    # any other unknown revision is refused.
+    SCHEMA_ACCEPT_NEWER_REVISIONS: str = ""
 
     # --- Redis ---
     REDIS_URL: str = "redis://localhost:6379/0"
