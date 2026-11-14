@@ -2,6 +2,7 @@
 
 import time
 from contextlib import asynccontextmanager
+from typing import TypedDict
 
 import structlog
 from fastapi import FastAPI, Request
@@ -89,12 +90,26 @@ async def lifespan(app: FastAPI):
     logger.info("app_shutdown")
 
 
+class _DocsUrls(TypedDict):
+    docs_url: str | None
+    redoc_url: str | None
+    openapi_url: str | None
+
+
+def api_docs_urls(environment: str) -> _DocsUrls:
+    """Production publishes no schema: disabling only /docs left /openapi.json, the
+    full route and model map the docs page renders, public. Nothing consumes it in
+    production, so it goes too; development and tests keep both."""
+    if environment == "production":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": None, "openapi_url": "/openapi.json"}
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
     lifespan=lifespan,
-    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
-    redoc_url=None,
+    **api_docs_urls(settings.ENVIRONMENT),
 )
 
 instrument_fastapi_app(app)
