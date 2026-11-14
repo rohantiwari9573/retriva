@@ -146,11 +146,11 @@ def test_failed_migration_exits_nonzero_and_leaves_no_partial_head(fresh_databas
         ]
 
 
-async def _check_schema(database: str) -> None:
+async def _check_schema(database: str) -> str:
     engine = create_async_engine(_database_url(database))
     try:
         async with async_sessionmaker(engine)() as session:
-            await assert_schema_is_current(session)
+            return await assert_schema_is_current(session)
     finally:
         await engine.dispose()
 
@@ -174,7 +174,7 @@ async def test_api_schema_check_rejects_a_database_behind_head(fresh_database: s
 async def test_api_schema_check_accepts_a_migrated_database(fresh_database: str) -> None:
     assert _run_migrate(_database_url(fresh_database))[0] == EXIT_OK
 
-    await _check_schema(fresh_database)
+    assert await _check_schema(fresh_database) == "current"
 
 
 def _mark_as_newer(database: str) -> None:
@@ -184,33 +184,34 @@ def _mark_as_newer(database: str) -> None:
         connection.execute("INSERT INTO alembic_version VALUES ('a_future_revision')")
 
 
-async def test_api_schema_check_rejects_an_unknown_revision(fresh_database: str) -> None:
-    """A mistyped `alembic stamp` or another branch's database must not be served."""
+async def test_api_schema_check_reports_an_unknown_revision_without_refusing(
+    fresh_database: str,
+) -> None:
+    """Refusing to boot here turned the documented gap between a production migration
+    and its deploy into an outage on any restart (Render's free plan spins down when
+    idle). The API serves and reports it; the migration step is what refuses it."""
     _mark_as_newer(fresh_database)
 
-    with pytest.raises(SchemaNotMigratedError, match="SCHEMA_ACCEPT_NEWER_REVISIONS"):
-        await _check_schema(fresh_database)
+    assert await _check_schema(fresh_database) == "unknown_revision"
 
 
 async def test_api_schema_check_accepts_a_declared_newer_revision(
     fresh_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Rolling the app back after a forward migration must not block boot, once the
-    operator names the newer revision."""
+    """A rollback past a migration, declared by the operator."""
     _mark_as_newer(fresh_database)
     monkeypatch.setattr(settings, "SCHEMA_ACCEPT_NEWER_REVISIONS", "other, a_future_revision")
 
-    await _check_schema(fresh_database)
+    assert await _check_schema(fresh_database) == "accepted_newer"
 
 
-async def test_api_schema_check_still_rejects_a_revision_not_on_the_list(
+async def test_api_schema_check_does_not_accept_a_revision_not_on_the_list(
     fresh_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _mark_as_newer(fresh_database)
     monkeypatch.setattr(settings, "SCHEMA_ACCEPT_NEWER_REVISIONS", "a_different_revision")
 
-    with pytest.raises(SchemaNotMigratedError, match="a_future_revision"):
-        await _check_schema(fresh_database)
+    assert await _check_schema(fresh_database) == "unknown_revision"
 
 
 @pytest.mark.parametrize("args", [(), ("--check",)])

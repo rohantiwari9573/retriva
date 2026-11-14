@@ -137,13 +137,22 @@ A deploy script can gate on `--check`: anything but 0 means don't deploy yet.
 
 ### Rolling back past a migration
 
-The API refuses to start, and the migration step exits 6, on a database revision the
-code doesn't know, because outside a rollback that means something is wrong (a mistyped
-`alembic stamp`, a database from another branch). During a rollback it is expected, so
-declare it: set `SCHEMA_ACCEPT_NEWER_REVISIONS` to the newer revision (from
-`SELECT version_num FROM alembic_version`) on the API before deploying the older code,
-and remove it once the newer code is deployed again. Migrations stay backward compatible
-with the previous release, which is what makes running the old code on it safe.
+A database revision the code doesn't know is expected in two situations: between running
+a release's migration and deploying its code (the order above), and while rolled back
+past a migration. Outside those it means something is wrong (a mistyped `alembic stamp`,
+a database from another branch). So:
+
+- The **API keeps serving** on it, so a restart in that gap (a crash, or Render's
+  free-plan spin-down) is not an outage. It logs `schema_revision_unknown` at error
+  level and `/readiness` shows `"schema": "unknown_revision"` under `degraded`.
+- The **migration step refuses it** with exit code 6, so `--check` stops a deploy.
+
+During a rollback, declare it: set `SCHEMA_ACCEPT_NEWER_REVISIONS` to the newer revision
+(from `SELECT version_num FROM alembic_version`) wherever the migration step or the API
+runs, and remove it once the newer code is deployed again. `/readiness` then shows
+`"schema": "accepted_newer"`. Builds from before R0 have no schema check and ignore the
+setting. Migrations stay backward compatible with the previous release, which is what
+makes running the old code on the newer schema safe.
 
 ### First deploy of the startup schema check
 
@@ -209,7 +218,7 @@ enabling it: a wrong setting would let clients choose their own rate-limit ident
 | `RATE_LIMIT_FALLBACK_MAX_KEYS` | API | 10000 | Memory bound of the fallback |
 | `MIGRATE_DB_WAIT_SECONDS` | Migration step | 60 | How long to wait for the database |
 | `MIGRATE_LOCK_WAIT_SECONDS` | Migration step | 300 | How long to wait for another runner's lock |
-| `SCHEMA_ACCEPT_NEWER_REVISIONS` | API and migration step | empty | Newer revisions to accept, only while rolled back |
+| `SCHEMA_ACCEPT_NEWER_REVISIONS` | API and migration step | empty | Newer revisions to accept, only while rolled back (else the step exits 6 and readiness shows the schema as degraded) |
 
 Also new in R0: production serves no `/openapi.json` (and no `/docs`, as before); and
 `backend/constraints.txt` pins every backend dependency for Docker builds and CI.

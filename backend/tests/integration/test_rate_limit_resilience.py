@@ -308,3 +308,24 @@ async def test_chat_limit_is_per_user_not_per_address(client: AsyncClient) -> No
 @pytest.fixture(autouse=True)
 def _quiet(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.CRITICAL)
+
+
+@pytest.mark.parametrize(
+    ("state", "degraded"),
+    [("current", []), ("accepted_newer", []), ("unknown_revision", ["schema"])],
+)
+async def test_readiness_reports_the_schema_state_from_startup(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, state: str, degraded: list[str]
+) -> None:
+    """An unknown revision doesn't stop the API (it's expected between a migration and
+    its deploy) but must be visible: it shows as degraded, while staying ready."""
+    from app.main import app
+
+    monkeypatch.setattr(app.state, "schema_state", state, raising=False)
+
+    response = await client.get("/readiness")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checks"]["schema"] == state
+    assert [name for name in body["degraded"] if name == "schema"] == degraded

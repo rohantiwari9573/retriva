@@ -9,6 +9,7 @@ against a schema older than it expects.
 import ast
 import re
 from pathlib import Path
+from typing import Literal
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -16,6 +17,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 EXIT_OK = 0
 EXIT_MIGRATION_FAILED = 1
@@ -39,8 +43,7 @@ _DESTRUCTIVE_SQL = re.compile(
 
 
 class SchemaNotMigratedError(RuntimeError):
-    """The database schema is behind what this build of the code requires, or at a
-    revision it doesn't know and wasn't told to accept."""
+    """The database schema is behind what this build of the code requires."""
 
 
 def accepted_newer_revisions() -> set[str]:
@@ -48,8 +51,9 @@ def accepted_newer_revisions() -> set[str]:
 
     A revision the code doesn't recognize is normal just after rolling the app back
     past a migration, and abnormal otherwise (a mistyped `alembic stamp`, a database
-    from another branch). Telling them apart needs the operator, so an unknown
-    revision is refused unless it is named here, for the duration of the rollback.
+    from another branch). Telling them apart needs the operator, so the migration
+    step refuses an unknown revision unless it is named here, and the API reports it
+    as degraded rather than accepted.
     """
     raw = settings.SCHEMA_ACCEPT_NEWER_REVISIONS
     return {part.strip() for part in raw.split(",") if part.strip()}
@@ -108,13 +112,21 @@ def destructive_operations(migration_source: str) -> list[str]:
     return found
 
 
-async def assert_schema_is_current(session: AsyncSession) -> None:
+SchemaState = Literal["current", "accepted_newer", "unknown_revision"]
+
+
+async def assert_schema_is_current(session: AsyncSession) -> SchemaState:
     """Refuse to serve traffic on a schema older than this code expects.
 
-    A revision this build doesn't recognize is accepted only if it is listed in
-    SCHEMA_ACCEPT_NEWER_REVISIONS: that is how a rollback past a migration runs on the
-    newer schema (migrations are written to stay compatible with the previous
-    release), without also accepting an arbitrary or mistyped revision.
+    A revision this build doesn't recognize doesn't stop the API: it is the normal
+    state between running a release's migration and deploying its code (the
+    documented order), and after rolling back past a migration, and refusing to
+    boot there would turn any restart in that gap (a crash, an idle spin-down) into
+    an outage. Instead it is reported: "accepted_newer" when the operator listed it in
+    SCHEMA_ACCEPT_NEWER_REVISIONS, otherwise "unknown_revision", logged as an error and
+    shown as degraded by /readiness. The migration step, which runs before deploys,
+    is what refuses it (exit 6), so an arbitrary or mistyped revision can't pass a
+    deploy as healthy.
     """
     script = ScriptDirectory.from_config(alembic_config())
     head = script.get_current_head()
@@ -126,7 +138,7 @@ async def assert_schema_is_current(session: AsyncSession) -> None:
 
     current = await session.scalar(text("SELECT version_num FROM alembic_version"))
     if current == head:
-        return
+        return "current"
     if current is None:
         raise SchemaNotMigratedError(f"Database has no applied revision. {hint}")
     known = {revision.revision for revision in script.walk_revisions()}
@@ -134,10 +146,15 @@ async def assert_schema_is_current(session: AsyncSession) -> None:
         raise SchemaNotMigratedError(
             f"Database is at revision {current} but this build requires {head}. {hint}"
         )
-    if current not in accepted_newer_revisions():
-        raise SchemaNotMigratedError(
-            f"Database is at revision {current}, which this build doesn't know. If this "
-            "is a rollback past a migration, set SCHEMA_ACCEPT_NEWER_REVISIONS="
-            f"{current} until the newer code is deployed again; otherwise find out how "
-            "the database got there before serving traffic."
-        )
+    if current in accepted_newer_revisions():
+        logger.warning("schema_revision_newer_accepted", current=current, head=head)
+        return "accepted_newer"
+    logger.error(
+        "schema_revision_unknown",
+        current=current,
+        head=head,
+        hint="Expected only between a release's migration and its deploy, or while "
+        "rolled back (then set SCHEMA_ACCEPT_NEWER_REVISIONS). Otherwise find out how "
+        "the database got to this revision.",
+    )
+    return "unknown_revision"

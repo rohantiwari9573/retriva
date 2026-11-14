@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     logger.info("app_startup", environment=settings.ENVIRONMENT)
     _check_production_config()
     async with AsyncSessionLocal() as session:
-        await assert_schema_is_current(session)
+        app.state.schema_state = await assert_schema_is_current(session)
     get_s3_storage_provider().ensure_bucket_exists()
     try:
         async with AsyncSessionLocal() as session:

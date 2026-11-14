@@ -5,7 +5,7 @@ public API contract. Readiness checks actual dependencies; liveness does not (a 
 Postgres shouldn't make an orchestrator kill and restart an otherwise-healthy process).
 """
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,10 +27,21 @@ async def liveness() -> dict[str, str]:
 
 
 @router.get("/readiness")
-async def readiness(response: Response, db: AsyncSession = Depends(get_db)) -> dict[str, object]:
+async def readiness(
+    request: Request, response: Response, db: AsyncSession = Depends(get_db)
+) -> dict[str, object]:
     checks: dict[str, str] = {}
     healthy = True
     degraded: list[str] = []
+
+    # Set once at startup (app.main lifespan). A revision this build doesn't know
+    # still serves, since that is expected between a migration and its deploy, but
+    # is shown here so it doesn't go unnoticed.
+    schema_state = getattr(request.app.state, "schema_state", None)
+    if schema_state is not None:
+        checks["schema"] = schema_state
+        if schema_state == "unknown_revision":
+            degraded.append("schema")
 
     try:
         await db.execute(text("SELECT 1"))
