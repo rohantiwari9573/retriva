@@ -363,3 +363,118 @@ async def test_missing_secret_means_assertions_are_ignored(
     )
 
     assert response.status_code == 429
+
+
+# --- refunds reach the counter that took the attempt ---------------------------
+
+UNREACHABLE_REDIS = "redis://127.0.0.1:1/15"
+
+
+async def _redis_count(key: str) -> int | None:
+    from redis.asyncio import Redis
+
+    redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        value = await redis.hget(key, "count")
+    finally:
+        await redis.aclose()
+    return None if value is None else int(value)
+
+
+def _email() -> str:
+    return f"refund-{uuid.uuid4().hex[:10]}@example.com"
+
+
+async def test_a_memory_reservation_is_refunded_in_memory_after_redis_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis came back between reserve and refund: the refund must not go to Redis,
+    where it would cancel a count it never added."""
+    email = _email()
+    key = rate_limit._login_failures_key(email)
+    reachable = settings.REDIS_URL
+    monkeypatch.setattr(settings, "REDIS_URL", UNREACHABLE_REDIS)
+    attempt = await rate_limit.reserve_login_attempt(email)
+    assert attempt.store == "memory"
+
+    monkeypatch.setattr(settings, "REDIS_URL", reachable)
+    monkeypatch.setattr(rate_limit, "_next_redis_attempt", 0.0)
+    await rate_limit.release_login_attempt(attempt)
+
+    assert rate_limit._fallback.hit_in_window(key, 60)[0] == 1  # the refund landed here
+    assert await _redis_count(key) is None  # and Redis was never touched
+
+
+async def test_a_redis_reservation_is_never_refunded_into_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis went down between reserve and refund: the attempt stays counted in Redis
+    (erring on the side of limiting) and the in-memory counters are left alone."""
+    email = _email()
+    key = rate_limit._login_failures_key(email)
+    reachable = settings.REDIS_URL
+    attempt = await rate_limit.reserve_login_attempt(email)
+    assert attempt.store == "redis"
+    rate_limit._fallback.hit(key, 60)  # someone else's attempt, counted while degraded
+
+    monkeypatch.setattr(settings, "REDIS_URL", UNREACHABLE_REDIS)
+    await rate_limit.release_login_attempt(attempt)
+
+    assert rate_limit._fallback.hit(key, 60) == 2
+    monkeypatch.setattr(settings, "REDIS_URL", reachable)
+    assert await _redis_count(key) == 1
+
+
+async def test_a_refund_never_reaches_a_later_redis_window() -> None:
+    from redis.asyncio import Redis
+
+    email = _email()
+    key = rate_limit._login_failures_key(email)
+    first = await rate_limit.reserve_login_attempt(email)
+    redis = Redis.from_url(settings.REDIS_URL)
+    try:
+        await redis.delete(key)  # the window ends
+    finally:
+        await redis.aclose()
+    second = await rate_limit.reserve_login_attempt(email)  # a new window starts
+    assert second.window != first.window
+
+    await rate_limit.release_login_attempt(first)
+
+    assert await _redis_count(key) == 1
+
+
+async def test_a_refund_in_its_own_redis_window_is_taken_back() -> None:
+    email = _email()
+    key = rate_limit._login_failures_key(email)
+    await rate_limit.reserve_login_attempt(email)
+    attempt = await rate_limit.reserve_login_attempt(email)
+
+    await rate_limit.release_login_attempt(attempt)
+
+    assert await _redis_count(key) == 1
+
+
+@pytest.mark.parametrize("redis_up", [True, False])
+async def test_concurrent_reserves_and_refunds_leave_exactly_the_failures(
+    monkeypatch: pytest.MonkeyPatch, redis_up: bool
+) -> None:
+    """20 concurrent logins, half refunded (successes) and half not (bad passwords):
+    exactly 10 stay counted, in whichever store took them."""
+    if not redis_up:
+        monkeypatch.setattr(settings, "REDIS_URL", UNREACHABLE_REDIS)
+    email = _email()
+    key = rate_limit._login_failures_key(email)
+
+    async def login(refund: bool) -> None:
+        attempt = await rate_limit.reserve_login_attempt(email)
+        await asyncio.sleep(0.02)  # the password check
+        if refund:
+            await rate_limit.release_login_attempt(attempt)
+
+    await asyncio.gather(*(login(refund=index % 2 == 0) for index in range(20)))
+
+    if redis_up:
+        assert await _redis_count(key) == 10
+    else:
+        assert rate_limit._fallback.hit(key, 60) == 11

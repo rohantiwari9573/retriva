@@ -32,9 +32,11 @@ appropriate tradeoff for this project's scale, not a claim otherwise.
 import asyncio
 import hashlib
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Coroutine
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import Any, Literal, cast
 
 from fastapi import Depends, Request
 from redis.asyncio import Redis
@@ -65,13 +67,32 @@ if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
 end
 return count
 """
-# Never below zero, and never recreates a counter whose window has already ended.
-_DECREMENT_IF_POSITIVE = """
-local count = tonumber(redis.call('GET', KEYS[1]) or '0')
-if count > 0 then
-  redis.call('DECR', KEYS[1])
+# Failed-login attempts are refunded, so a refund must reach the exact counter that
+# took the attempt: this one keeps a window id (ARGV[2], new per window) next to the
+# count, and returns both. Same atomic expiry as above.
+_RESERVE_IN_WINDOW = """
+local window = redis.call('HGET', KEYS[1], 'window')
+if not window then
+  window = ARGV[2]
+  redis.call('HSET', KEYS[1], 'window', window)
 end
-return count
+local count = redis.call('HINCRBY', KEYS[1], 'count', 1)
+if redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return {count, window}
+"""
+# Only in the window the attempt was counted in (ARGV[1]), never below zero, and
+# never recreates a counter whose window has already ended.
+_REFUND_IN_WINDOW = """
+if redis.call('HGET', KEYS[1], 'window') ~= ARGV[1] then
+  return 0
+end
+local count = tonumber(redis.call('HGET', KEYS[1], 'count') or '0')
+if count > 0 then
+  redis.call('HINCRBY', KEYS[1], 'count', -1)
+end
+return 1
 """
 
 
@@ -90,6 +111,11 @@ class InMemoryRateLimiter:
         return len(self._windows)
 
     def hit(self, key: str, window_seconds: int) -> int:
+        return self.hit_in_window(key, window_seconds)[0]
+
+    def hit_in_window(self, key: str, window_seconds: int) -> tuple[int, float]:
+        """Counts a hit; returns the new count and the window it went into (its
+        expiry), which release() takes to refund that window and no other."""
         now = self._clock()
         count, expires_at = self._windows.get(key, (0, 0.0))
         if expires_at <= now:
@@ -97,10 +123,14 @@ class InMemoryRateLimiter:
             count, expires_at = 0, now + window_seconds
             self._make_room(now)
         self._windows[key] = (count + 1, expires_at)
-        return count + 1
+        return count + 1, expires_at
 
-    def release(self, key: str) -> None:
+    def release(self, key: str, window: float | None = None) -> None:
+        """Takes one hit back, only from a live window and, when `window` is given,
+        only if it is still the window the hit was counted in."""
         count, expires_at = self._windows.get(key, (0, 0.0))
+        if window is not None and expires_at != window:
+            return
         if count > 0 and expires_at > self._clock():
             self._windows[key] = (count - 1, expires_at)
 
@@ -157,16 +187,35 @@ async def _redis_increment(key: str, window_seconds: int) -> int:
         await redis.aclose()
 
 
-async def _redis_release(key: str) -> None:
-    redis: Redis = Redis.from_url(
+def _redis_client() -> Redis:
+    return Redis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
         socket_connect_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
         socket_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
         retry=Retry(NoBackoff(), 0),
     )
+
+
+async def _redis_reserve(key: str, window_seconds: int) -> tuple[int, str]:
+    redis = _redis_client()
+    start = time.perf_counter()
     try:
-        await redis.eval(_DECREMENT_IF_POSITIVE, 1, key)  # type: ignore[misc]
+        count, window = await redis.eval(  # type: ignore[misc]
+            _RESERVE_IN_WINDOW, 1, key, window_seconds, uuid.uuid4().hex
+        )
+        return int(count), str(window)
+    finally:
+        redis_operation_duration_seconds.labels(operation="rate_limit_incr").observe(
+            time.perf_counter() - start
+        )
+        await redis.aclose()
+
+
+async def _redis_refund(key: str, window: str) -> None:
+    redis = _redis_client()
+    try:
+        await redis.eval(_REFUND_IN_WINDOW, 1, key, window)  # type: ignore[misc]
     finally:
         await redis.aclose()
 
@@ -209,14 +258,47 @@ async def _increment(key: str, window_seconds: int) -> int:
         ) from exc
 
 
-async def _release(key: str) -> None:
-    """Best effort: if this fails, the attempt simply stays counted until the window
-    ends, which errs on the side of limiting."""
-    try:
-        if time.monotonic() >= _next_redis_attempt:
-            await _redis_release(key)
+@dataclass(frozen=True)
+class LoginAttempt:
+    """Where a reserved login attempt was counted: the store and the window, so its
+    refund reaches that counter even if Redis went down or came back in between, and
+    never a later window that reused the key."""
+
+    key: str
+    store: Literal["redis", "memory"]
+    window: str | float
+
+
+async def _reserve(key: str, window_seconds: int) -> tuple[int, LoginAttempt]:
+    if time.monotonic() >= _next_redis_attempt:
+        try:
+            count, window = await _redis_reserve(key, window_seconds)
+        except Exception as exc:  # noqa: BLE001 - a Redis failure must never fail the request
+            _enter_fallback(exc)
         else:
-            _fallback.release(key)
+            _leave_fallback()
+            return count, LoginAttempt(key=key, store="redis", window=window)
+
+    rate_limit_fallback_requests_total.inc()
+    try:
+        count, expires_at = _fallback.hit_in_window(key, window_seconds)
+    except Exception as exc:
+        logger.error("rate_limit_fallback_failed", exc_info=exc)
+        raise RateLimiterUnavailableError(
+            "This service is temporarily unavailable. Please try again shortly."
+        ) from exc
+    return count, LoginAttempt(key=key, store="memory", window=expires_at)
+
+
+async def _refund(attempt: LoginAttempt) -> None:
+    """Best effort: if this fails (Redis down for a Redis-counted attempt), the attempt
+    simply stays counted until its window ends, which errs on the side of limiting. It
+    is never moved to the other store, where it would refund someone else's count."""
+    try:
+        if attempt.store == "redis":
+            await _redis_refund(attempt.key, str(attempt.window))
+        else:
+            _fallback.release(attempt.key, window=float(attempt.window))
     except Exception as exc:  # noqa: BLE001 - never fail a login over a refund
         logger.warning("rate_limit_release_failed", reason=type(exc).__name__)
 
@@ -238,17 +320,20 @@ def _resolve_client_ip(request: Request) -> str:
 
 
 def _login_failures_key(email: str) -> str:
-    # Hashed so email addresses aren't stored in Redis or in memory.
+    # Hashed so email addresses aren't stored in Redis or in memory. A hash (count and
+    # window id) since R0; the older string counters under ":account_failures:" just
+    # expire within their minute, so a mixed deploy never meets the other type.
     identity = hashlib.sha256(email.strip().lower().encode()).hexdigest()
-    return f"ratelimit:login:account_failures:{identity}"
+    return f"ratelimit:login:account_attempts:{identity}"
 
 
-async def reserve_login_attempt(email: str) -> None:
+async def reserve_login_attempt(email: str) -> LoginAttempt:
     """Counts the attempt atomically before the password is checked, so concurrent
     guesses can't all pass on the same count. Runs for known and unknown emails alike,
     so the response never reveals whether an account exists or a guess was right.
-    Anything other than a credential failure gives it back: see release_login_attempt."""
-    attempt = await _increment(_login_failures_key(email), 60)
+    Anything other than a credential failure gives it back: pass the returned
+    reservation to release_login_attempt."""
+    attempt, reservation = await _reserve(_login_failures_key(email), 60)
     if attempt > settings.RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE:
         rate_limit_rejected_total.labels(endpoint="login_account").inc()
         raise RateLimitedError(
@@ -258,10 +343,11 @@ async def reserve_login_attempt(email: str) -> None:
     if failures_over_soft_limit >= 0:
         delay = settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS * 2**failures_over_soft_limit
         await asyncio.sleep(min(delay, settings.RATE_LIMIT_LOGIN_ACCOUNT_DELAY_MAX_SECONDS))
+    return reservation
 
 
-async def release_login_attempt(email: str) -> None:
-    await _release(_login_failures_key(email))
+async def release_login_attempt(reservation: LoginAttempt) -> None:
+    await _refund(reservation)
 
 
 def rate_limit(

@@ -37,7 +37,7 @@ async def register(
 async def login(
     payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)
 ) -> UserPublic:
-    await reserve_login_attempt(payload.email)
+    attempt = await reserve_login_attempt(payload.email)
     credential_failure = False
     try:
         service = AuthService(db)
@@ -49,7 +49,7 @@ async def login(
         raise
     finally:
         if not credential_failure:
-            await release_login_attempt(payload.email)
+            await release_login_attempt(attempt)
     set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
     return UserPublic.model_validate(user)
 
