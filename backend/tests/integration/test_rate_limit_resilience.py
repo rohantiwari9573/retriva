@@ -213,6 +213,18 @@ async def test_readiness_stays_ready_but_reports_redis_when_down(
     assert body["degraded"] == ["redis"]
 
 
+async def test_readiness_reports_a_malformed_redis_url_as_degraded(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Redis.from_url raises on a bad scheme; that must not turn readiness into a 500."""
+    monkeypatch.setattr(settings, "REDIS_URL", "not-a-redis-url")
+
+    response = await client.get("/readiness")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["redis"] == "unavailable"
+
+
 # --- identity behind the proxy ----------------------------------------------
 
 

@@ -9,8 +9,12 @@
 #
 # Usage on the deployment host:
 #   docker compose -f docker-compose.prod.yml build
-#   docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+#   docker compose -f docker-compose.prod.yml run --rm backend python -m scripts.migrate
 #   docker compose -f docker-compose.prod.yml up -d
+#
+# Migrate before `up`: the backend refuses to start on a schema behind head.
+# Use scripts.migrate, not a bare `alembic upgrade head`: it takes the advisory
+# lock and refuses unreviewed destructive operations (see DEPLOYMENT.md).
 #
 # See docs/aws-deployment.md for the full deployment sequence, cost notes,
 # and cleanup procedure.

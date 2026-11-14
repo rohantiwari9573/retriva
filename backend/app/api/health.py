@@ -46,19 +46,22 @@ async def readiness(response: Response, db: AsyncSession = Depends(get_db)) -> d
     # document blocks in Celery's result-backend reconnect loop (measured 12 s to
     # 150 s) before failing the document with a 503; if Redis returns in time the
     # upload goes through. Inline mode, used on Render, doesn't queue through it.
-    redis_client: Redis = Redis.from_url(
-        settings.REDIS_URL,
-        socket_connect_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
-        socket_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
-    )
+    redis_client: Redis | None = None
     try:
+        # Inside the try: a malformed REDIS_URL is a degraded Redis, not a 500.
+        redis_client = Redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+            socket_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+        )
         await redis_client.ping()
         checks["redis"] = "ok"
     except Exception:
         checks["redis"] = "unavailable"
         degraded.append("redis")
     finally:
-        await redis_client.aclose()
+        if redis_client is not None:
+            await redis_client.aclose()
 
     if not healthy:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

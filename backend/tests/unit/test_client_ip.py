@@ -178,8 +178,15 @@ def test_no_peer_at_all_has_a_stable_identity() -> None:
     assert resolve_client_ip(_request(None)) == "unknown"
 
 
-def test_signature_vector_matches_the_frontend() -> None:
-    """Same vector as frontend/src/lib/client-ip-assertion.test.ts."""
-    message = "1700000000.198.51.100.7"
-    signature = hmac.new(b"contract-test-secret", message.encode(), sha256).hexdigest()
-    assert signature == "434f9f400f62952a6a60d90a2a5f1c9885c87386b26838a52cf4971c0868489e"
+def test_signature_vector_matches_the_frontend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same vector as frontend/src/lib/client-ip-assertion.test.ts, verified by the
+    production code path, so a change to the backend's message format fails here
+    even if this file's _signed helper were changed to match it."""
+    monkeypatch.setattr(settings, "EDGE_PROXY_SHARED_SECRET", "contract-test-secret")
+    monkeypatch.setattr("app.core.client_ip.time.time", lambda: 1700000000.0)
+    headers = {
+        VERIFIED_IP_HEADER: "198.51.100.7",
+        TIMESTAMP_HEADER: "1700000000",
+        SIGNATURE_HEADER: "434f9f400f62952a6a60d90a2a5f1c9885c87386b26838a52cf4971c0868489e",
+    }
+    assert resolve_client_ip(_request("10.0.0.1", headers)) == "198.51.100.7"
