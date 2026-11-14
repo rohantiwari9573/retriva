@@ -30,6 +30,7 @@ async def liveness() -> dict[str, str]:
 async def readiness(response: Response, db: AsyncSession = Depends(get_db)) -> dict[str, object]:
     checks: dict[str, str] = {}
     healthy = True
+    degraded: list[str] = []
 
     try:
         await db.execute(text("SELECT 1"))
@@ -38,16 +39,35 @@ async def readiness(response: Response, db: AsyncSession = Depends(get_db)) -> d
         checks["postgres"] = "unavailable"
         healthy = False
 
+    # Redis being down degrades this instance but doesn't make it unready: rate
+    # limiting falls back to per-process counters and auth keeps working, whereas
+    # pulling every instance out of rotation would turn a Redis outage into a
+    # full one. Celery-mode uploads do need Redis: while it is down, queuing a
+    # document blocks in Celery's result-backend reconnect loop (measured 12 s to
+    # 150 s) before failing the document with a 503; if Redis returns in time the
+    # upload goes through. Inline mode, used on Render, doesn't queue through it.
+    redis_client: Redis | None = None
     try:
-        redis_client: Redis = Redis.from_url(settings.REDIS_URL)
+        # Inside the try: a malformed REDIS_URL is a degraded Redis, not a 500.
+        redis_client = Redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+            socket_timeout=settings.RATE_LIMIT_REDIS_TIMEOUT_SECONDS,
+        )
         await redis_client.ping()
-        await redis_client.aclose()
         checks["redis"] = "ok"
     except Exception:
         checks["redis"] = "unavailable"
-        healthy = False
+        degraded.append("redis")
+    finally:
+        if redis_client is not None:
+            await redis_client.aclose()
 
     if not healthy:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
-    return {"status": "ready" if healthy else "not_ready", "checks": checks}
+    return {
+        "status": "ready" if healthy else "not_ready",
+        "checks": checks,
+        "degraded": degraded,
+    }

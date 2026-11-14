@@ -236,13 +236,38 @@ class Settings(BaseSettings):
     # docker-compose.prod.yml specifically so this list can name it - should
     # ever be listed here.
     TRUSTED_PROXY_IPS: list[str] = []
+    # Shared with the frontend's edge proxy, which signs the visitor's IP with
+    # it (see app/core/client_ip.py). Empty disables the feature. Set the same
+    # value on Vercel and on the API, and nowhere a client could read it.
+    EDGE_PROXY_SHARED_SECRET: str = ""
+    EDGE_PROXY_MAX_CLOCK_SKEW_SECONDS: int = 60
+    # Header holding the client IP on platforms whose edge always overwrites it
+    # (for example true-client-ip behind Cloudflare). Empty means never read one.
+    TRUSTED_CLIENT_IP_HEADER: str = ""
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
+    # Failed logins per account across all addresses, which bounds guessing from
+    # rotating IPs. Successful logins don't count. At the soft threshold responses
+    # slow down progressively; at the cap attempts are refused, including with the
+    # correct password, since letting those through would confirm a guess. The cap
+    # is set high because it's also a lockout lever: at 5 per minute per IP, holding
+    # an account at 30 takes at least 6 addresses.
+    RATE_LIMIT_LOGIN_ACCOUNT_SOFT_FAILURES: int = 10
+    RATE_LIMIT_LOGIN_ACCOUNT_FAILURES_PER_MINUTE: int = 30
+    RATE_LIMIT_LOGIN_ACCOUNT_DELAY_BASE_SECONDS: float = 0.25
+    RATE_LIMIT_LOGIN_ACCOUNT_DELAY_MAX_SECONDS: float = 2.0
     RATE_LIMIT_REGISTER_PER_MINUTE: int = 3
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 20
     RATE_LIMIT_CHAT_PER_MINUTE: int = 20
     RATE_LIMIT_UPLOAD_PER_MINUTE: int = 10
     RATE_LIMIT_RETRY_PER_MINUTE: int = 10
     RATE_LIMIT_RETRIEVAL_DEBUG_PER_MINUTE: int = 20
+    # Redis is the shared store for limits. While it's unreachable each API
+    # process falls back to its own bounded in-memory counters: Redis is retried
+    # at most every RATE_LIMIT_REDIS_RETRY_SECONDS, and each attempt waits at most
+    # RATE_LIMIT_REDIS_TIMEOUT_SECONDS.
+    RATE_LIMIT_REDIS_TIMEOUT_SECONDS: float = 0.5
+    RATE_LIMIT_REDIS_RETRY_SECONDS: float = 5.0
+    RATE_LIMIT_FALLBACK_MAX_KEYS: int = 10_000
 
     # --- Observability (Phase 8) ---
     LOG_LEVEL: str = "INFO"

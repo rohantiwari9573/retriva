@@ -1,0 +1,206 @@
+{
+ "label": "warm",
+ "state": {
+  "email": "bench-50b7a611b0c7@example.com",
+  "organization_id": "c8288d6e-3b1e-4968-8dfd-130859b51582"
+ },
+ "api_latency": [
+  {
+   "name": "GET /health",
+   "requests": 2000,
+   "concurrency": 20,
+   "expected_status": 200,
+   "statuses": {
+    "200": 2000
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 123.3,
+   "mean_ms": 161.62,
+   "p50_ms": 107.57,
+   "p95_ms": 464.76,
+   "p99_ms": 732.09,
+   "max_ms": 1469.15
+  },
+  {
+   "name": "GET /readiness",
+   "requests": 500,
+   "concurrency": 10,
+   "expected_status": 200,
+   "statuses": {
+    "200": 500
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 121.8,
+   "mean_ms": 81.75,
+   "p50_ms": 77.77,
+   "p95_ms": 115.64,
+   "p99_ms": 158.27,
+   "max_ms": 220.35
+  },
+  {
+   "name": "POST /auth/login (correct)",
+   "requests": 100,
+   "concurrency": 4,
+   "expected_status": 200,
+   "statuses": {
+    "200": 100
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 13.6,
+   "mean_ms": 294.89,
+   "p50_ms": 289.31,
+   "p95_ms": 340.46,
+   "p99_ms": 344.85,
+   "max_ms": 347.35
+  },
+  {
+   "name": "POST /auth/login (wrong password)",
+   "requests": 100,
+   "concurrency": 4,
+   "expected_status": 401,
+   "statuses": {
+    "401": 100
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 14.7,
+   "mean_ms": 269.59,
+   "p50_ms": 267.28,
+   "p95_ms": 311.89,
+   "p99_ms": 324.61,
+   "max_ms": 327.51
+  },
+  {
+   "name": "GET /documents",
+   "requests": 500,
+   "concurrency": 10,
+   "expected_status": 200,
+   "statuses": {
+    "200": 500
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 131.0,
+   "mean_ms": 75.85,
+   "p50_ms": 68.99,
+   "p95_ms": 120.92,
+   "p99_ms": 162.41,
+   "max_ms": 229.29
+  },
+  {
+   "name": "POST /retrieval/debug (hybrid)",
+   "requests": 200,
+   "concurrency": 4,
+   "expected_status": 200,
+   "statuses": {
+    "200": 200
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 30.2,
+   "mean_ms": 131.75,
+   "p50_ms": 126.27,
+   "p95_ms": 184.54,
+   "p99_ms": 204.15,
+   "max_ms": 222.9
+  }
+ ],
+ "redis": {
+  "PING": {
+   "samples": 1000,
+   "mean_ms": 0.12,
+   "p50_ms": 0.09,
+   "p95_ms": 0.19,
+   "p99_ms": 0.26,
+   "max_ms": 8.51
+  },
+  "INCR": {
+   "samples": 1000,
+   "mean_ms": 0.09,
+   "p50_ms": 0.08,
+   "p95_ms": 0.16,
+   "p99_ms": 0.26,
+   "max_ms": 0.92
+  }
+ },
+ "database": {
+  "document_list": {
+   "repeats": 7,
+   "median_execution_ms": 0.022,
+   "rows_returned": 20,
+   "scan_nodes": [
+    "Seq Scan on documents"
+   ]
+  },
+  "keyword_search": {
+   "repeats": 7,
+   "median_execution_ms": 0.886,
+   "rows_returned": 20,
+   "scan_nodes": [
+    "Seq Scan on document_chunks",
+    "Seq Scan on documents"
+   ]
+  },
+  "vector_search": {
+   "repeats": 7,
+   "median_execution_ms": 0.061,
+   "rows_returned": 8,
+   "scan_nodes": [
+    "Index Scan on documents_pkey",
+    "Index Scan on ix_document_chunks_embedding_cosine"
+   ]
+  },
+  "row_counts": {
+   "documents": 23,
+   "document_chunks": 683
+  }
+ },
+ "vector_retrieval": {
+  "queries": 20,
+  "top_k": 30,
+  "rows_mean": 6.7,
+  "rows_min": 3,
+  "recall_mean": 0.018,
+  "recall_min": 0.0,
+  "mean_ms": 0.81,
+  "p50_ms": 0.46,
+  "p95_ms": 0.79,
+  "p99_ms": 7.17,
+  "max_ms": 7.17
+ },
+ "resources": {
+  "backend": {
+   "samples": 6,
+   "cpu_percent_mean": 133.5,
+   "cpu_percent_max": 278.5,
+   "mem_mb_max": 160.6
+  },
+  "minio": {
+   "samples": 6,
+   "cpu_percent_mean": 1.0,
+   "cpu_percent_max": 2.5,
+   "mem_mb_max": 77.5
+  },
+  "postgres": {
+   "samples": 6,
+   "cpu_percent_mean": 4.1,
+   "cpu_percent_max": 16.5,
+   "mem_mb_max": 92.5
+  },
+  "redis": {
+   "samples": 6,
+   "cpu_percent_mean": 2.6,
+   "cpu_percent_max": 4.6,
+   "mem_mb_max": 4.0
+  },
+  "stub-ai": {
+   "samples": 6,
+   "cpu_percent_mean": 7.0,
+   "cpu_percent_max": 13.1,
+   "mem_mb_max": 17.4
+  },
+  "worker": {
+   "samples": 6,
+   "cpu_percent_mean": 12.2,
+   "cpu_percent_max": 72.7,
+   "mem_mb_max": 218.5
+  }
+ }
+}

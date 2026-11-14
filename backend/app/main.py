@@ -19,6 +19,7 @@ from app.core.metrics import (
     http_requests_in_flight,
     http_requests_total,
 )
+from app.core.migrations import assert_schema_is_current
 from app.core.request_id import resolve_request_id
 from app.core.request_size import RequestBodyLimitMiddleware
 from app.core.telemetry import (
@@ -61,12 +62,19 @@ def _check_production_config() -> None:
             "allow_credentials=True this would allow any site to make "
             "authenticated requests on a user's behalf)."
         )
+    if settings.EDGE_PROXY_SHARED_SECRET and len(settings.EDGE_PROXY_SHARED_SECRET) < 32:
+        raise RuntimeError(
+            "EDGE_PROXY_SHARED_SECRET must be at least 32 characters - a guessable "
+            "value would let clients choose their own rate-limit identity."
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("app_startup", environment=settings.ENVIRONMENT)
     _check_production_config()
+    async with AsyncSessionLocal() as session:
+        await assert_schema_is_current(session)
     get_s3_storage_provider().ensure_bucket_exists()
     try:
         async with AsyncSessionLocal() as session:

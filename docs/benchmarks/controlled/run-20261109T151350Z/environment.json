@@ -1,0 +1,23 @@
+{
+ "started_at": "2026-11-09T15:13:50.011326+00:00",
+ "host": {
+  "platform": "Windows-11-10.0.26300-SP0",
+  "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+  "cpu_count": 12,
+  "free_memory_gb_at_start": 3.84
+ },
+ "docker": "29.4.0",
+ "docker_vm": "12 cpus, 8167563264 bytes",
+ "other_containers": [
+  "retriva-controlled-bench-backend-1",
+  "retriva-controlled-bench-worker-1",
+  "retriva-controlled-bench-redis-1",
+  "retriva-controlled-bench-postgres-1",
+  "retriva-controlled-bench-minio-1"
+ ],
+ "variants": {
+  "old": "f60c34cb2dbc5d38d06538aeedbac26fbc7ea2fd",
+  "r0": "5239f1e48ab242b3d059ed8fa0751a5895cb3a3c",
+  "both": "e688d17c29f9337bb84fad3472db9163061a1aa1"
+ }
+}

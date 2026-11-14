@@ -9,8 +9,12 @@
 #
 # Usage on the deployment host:
 #   docker compose -f docker-compose.prod.yml build
-#   docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+#   docker compose -f docker-compose.prod.yml run --rm backend python -m scripts.migrate
 #   docker compose -f docker-compose.prod.yml up -d
+#
+# Migrate before `up`: the backend refuses to start on a schema behind head.
+# Use scripts.migrate, not a bare `alembic upgrade head`: it takes the advisory
+# lock and refuses unreviewed destructive operations (see DEPLOYMENT.md).
 #
 # See docs/aws-deployment.md for the full deployment sequence, cost notes,
 # and cleanup procedure.
@@ -62,7 +66,9 @@ services:
       retries: 10
 
   minio:
-    image: quay.io/minio/minio:latest
+    # MinIO stopped publishing community images. Community fork, pinned by digest:
+    # see "Object storage image" in DEPLOYMENT.md before changing it.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     restart: unless-stopped
     command: server /data --console-address ":9001"
     env_file: .env
