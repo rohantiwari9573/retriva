@@ -154,15 +154,18 @@ class RequestBodyLimitMiddleware:
             except ValueError:
                 declared = None  # malformed: the server and app reject it as before
             if declared is not None and declared > max_bytes:
-                # Drain so the sender reads the 413, except when it is waiting for
-                # "100 Continue": reading would invite the body it hasn't sent. The
-                # drain runs whatever the declared size, since it stops at
-                # DRAIN_MAX_BYTES/SECONDS anyway: a proxy that truncated the body
-                # (Next.js past proxyClientMaxBodySize) keeps the original, larger
-                # Content-Length, then goes quiet; closing on it mid-write instead
-                # made the proxy answer 500 rather than pass the 413 on.
+                # Drain so the sender reads the 413 rather than a reset. It runs
+                # whatever the declared size, since it stops at DRAIN_MAX_BYTES/
+                # SECONDS anyway: a proxy that truncated the body (Next.js past
+                # proxyClientMaxBodySize) keeps the original, larger Content-Length,
+                # then goes quiet; closing on it mid-write made the proxy answer 500.
+                # With Expect: 100-continue, reading invites the body (the server
+                # sends 100 on the first read). That is still right within the drain
+                # bound, because a proxy may have answered 100 itself and be sending
+                # already; only a body too large to drain is refused unread, since
+                # draining it would end in a reset either way.
                 expects_continue = headers.get(b"expect", b"").lower() == b"100-continue"
-                if not expects_continue:
+                if not expects_continue or declared <= DRAIN_MAX_BYTES:
                     await _drain(receive, already_received=False)
                 await _send_too_large(send, upload=upload)
                 return

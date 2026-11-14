@@ -213,10 +213,12 @@ body and not sending it. `RequestBodyLimitMiddleware`
     This applies whatever size is declared: a proxy that truncated the body keeps
     the original Content-Length, and closing on it mid-write made Next.js answer
     500 instead of passing the 413 on.
-  - A client sending `Expect: 100-continue` is refused without being asked for
-    its body. The Next.js proxy drops that header before forwarding (it has
-    already answered it and buffered the body), so a proxied upload is always
-    drained and gets its 413. Through the proxy, 26, 40 and 100 MiB uploads,
+  - With `Expect: 100-continue`, a body declared within the drain bound is also
+    drained (the server sends 100 on the first read), because a proxy may have
+    answered 100 itself and be sending already; one declared past the bound is
+    refused without being asked for. The Next.js proxy drops the header before
+    forwarding (it has already answered it and buffered the body), so a proxied
+    upload is always drained and gets its 413. Through the proxy, 26, 40 and 100 MiB uploads,
     with and without `Expect` and chunked, got 413 in 92 of 92 tries.
 - **What the timeouts cover:** a body that stops arriving, or trickles past its
   deadline, gets a 408 with `connection: close`. Once the body is complete,

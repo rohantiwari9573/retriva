@@ -318,10 +318,26 @@ async def test_waiting_for_a_disconnect_after_the_body_is_not_timed(monkeypatch)
     assert sent[0]["status"] == 200
 
 
-async def test_a_client_waiting_for_100_continue_is_not_asked_for_the_body() -> None:
-    """Reading would make the server send 100 Continue and invite the upload."""
+async def test_a_body_with_expect_within_the_drain_bound_is_drained() -> None:
+    """A proxy may have answered 100 Continue itself and be sending the body already
+    while forwarding Expect; refusing it unread made that proxy fail with a reset."""
     status, consumed = await _run_raw(
         content_length=10 * 500, chunks=10, extra_headers=[(b"expect", b"100-continue")]
+    )
+
+    assert status == 413
+    assert consumed == 10
+
+
+async def test_a_client_waiting_for_100_continue_is_not_asked_for_an_undrainable_body(
+    monkeypatch,
+) -> None:
+    """Past the drain bound the connection resets anyway, so reading would only invite
+    an upload that can't end in a readable 413."""
+    monkeypatch.setattr("app.core.request_size.DRAIN_MAX_BYTES", 2000)
+
+    status, consumed = await _run_raw(
+        content_length=10**9, chunks=10**6, extra_headers=[(b"expect", b"100-continue")]
     )
 
     assert status == 413
