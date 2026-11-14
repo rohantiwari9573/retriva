@@ -386,6 +386,46 @@ def test_killed_multi_revision_upgrade_leaves_no_partial_revision(fresh_database
     assert _revision_and_index(fresh_database) == (expected_head(), False)
 
 
+def test_killed_upgrade_rolls_back_revisions_that_had_already_finished(
+    fresh_database: str,
+) -> None:
+    """The live (online) path, killed in its second pending revision. 284636820202
+    only touches documents and has fully run when 6f45bc893ebc blocks creating its
+    foreign key to organizations; the kill must undo the finished revision too.
+    With transaction_per_migration it would stay committed at 284636820202."""
+    start = "31c50429804f"
+    _upgrade_to(fresh_database, start)
+    conninfo = _database_url(fresh_database).replace("postgresql+asyncpg://", "postgresql://")
+
+    with psycopg.connect(conninfo) as blocker:
+        blocker.execute("LOCK TABLE organizations IN ACCESS EXCLUSIVE MODE")
+        process = _migrate_process(_database_url(fresh_database))
+        _wait_for_lock_wait(fresh_database)
+        blocked_on = _query(
+            fresh_database,
+            "SELECT query FROM pg_stat_activity "
+            "WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )[0][0]
+        # Proves the first pending revision has finished and the second is running.
+        assert "CREATE TABLE conversations" in blocked_on, blocked_on
+        _kill(process)
+        blocker.rollback()
+
+    _wait_until(lambda: _advisory_locks(fresh_database) == 0, "the advisory lock to be freed")
+    assert _query(fresh_database, "SELECT version_num FROM alembic_version") == [(start,)]
+    assert _query(fresh_database, "SELECT to_regclass('document_chunks') IS NULL")[0][0]
+    assert _query(fresh_database, "SELECT to_regclass('conversations') IS NULL")[0][0]
+    assert (
+        _query(fresh_database, "SELECT count(*) FROM pg_extension WHERE extname = 'vector'")[0][0]
+        == 0
+    )
+
+    code, output = _run_migrate(_database_url(fresh_database))
+
+    assert code == EXIT_OK, output
+    assert _revision_and_index(fresh_database) == (expected_head(), False)
+
+
 def test_all_pending_revisions_run_in_one_transaction() -> None:
     """What makes an interrupted multi-revision upgrade all-or-nothing. A switch to
     transaction_per_migration would let a kill leave earlier revisions applied."""
