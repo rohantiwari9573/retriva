@@ -17,20 +17,18 @@ const AUTH_PAGES = ["/login", "/register"];
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Every proxied API call drops Expect (see forwardedApiHeaders). The auth routes
-  // are the only ones limited per IP, so only they get a signed client-IP
-  // assertion. Running here doesn't add buffering: once a proxy file exists Next
-  // buffers every request body up to experimental.proxyClientMaxBodySize anyway
-  // (see next.config.ts), and responses, including SSE streams, pass through.
+  // Only the auth routes come through here (see config.matcher): they are the only
+  // API routes limited per client IP, so they get the signed client-IP assertion.
+  // Every other /api route, document uploads above all, must NOT match: on Vercel a
+  // matched request runs this function, whose request body is capped at ~4.5 MB, so
+  // uploads of 4.25 MiB or more were refused (500/413) before reaching the API.
+  // Unmatched /api requests go straight through the rewrite in next.config.ts.
   if (pathname.startsWith("/api/")) {
-    const forwarded = forwardedApiHeaders(request.headers);
-    const headers = pathname.startsWith("/api/v1/auth/")
-      ? await withClientIpAssertion(forwarded, {
-          secret: process.env.EDGE_PROXY_SHARED_SECRET,
-          onVercel: process.env.VERCEL === "1",
-          nowSeconds: Math.floor(Date.now() / 1000),
-        })
-      : forwarded;
+    const headers = await withClientIpAssertion(forwardedApiHeaders(request.headers), {
+      secret: process.env.EDGE_PROXY_SHARED_SECRET,
+      onVercel: process.env.VERCEL === "1",
+      nowSeconds: Math.floor(Date.now() / 1000),
+    });
     return NextResponse.next({ request: { headers } });
   }
 
@@ -52,5 +50,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*", "/chat/:path*", "/documents/:path*", "/admin/:path*", "/login", "/register", "/api/:path*"],
+  // Auth API routes only. Never widen this to /api/:path*: see the note in proxy().
+  matcher: ["/dashboard/:path*", "/settings/:path*", "/chat/:path*", "/documents/:path*", "/admin/:path*", "/login", "/register", "/api/v1/auth/:path*"],
 };

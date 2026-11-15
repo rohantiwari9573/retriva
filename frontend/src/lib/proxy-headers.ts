@@ -1,5 +1,8 @@
 /**
- * Headers for an /api request the proxy forwards to the API.
+ * Headers for an /api auth request the proxy forwards to the API. Only the auth
+ * routes run the proxy (see proxy.ts config.matcher); uploads bypass it, and on a
+ * self-hosted Next server the API's own Expect/drain handling covers them
+ * (backend/app/core/request_size.py).
  *
  * `Expect: 100-continue` is removed. Next has already answered it to the client and
  * buffered the body, then streams that body upstream regardless; forwarded, the
