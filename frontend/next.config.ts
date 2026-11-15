@@ -15,6 +15,14 @@ const nextConfig: NextConfig = {
     // API intact enough for it to answer 413. At exactly 26mb a chunked upload was
     // cut to the cap and answered 422 instead. See src/lib/next-config.test.ts.
     proxyClientMaxBodySize: "27mb",
+    // Rewrites (and redirects/headers) match case-insensitively by default, but the
+    // proxy matcher is case-sensitive. Without this, /API/v1/auth/login skipped the
+    // proxy (no signed client IP, so login was rate-limited per Vercel egress IP
+    // instead of per visitor) yet was still rewritten to the API's
+    // /api/v1/auth/login. Case-sensitive, only the exact /api/ prefix is forwarded,
+    // and every forwarded auth path is one the proxy matcher runs on. See
+    // src/proxy.test.ts.
+    caseSensitiveRoutes: true,
   },
   // Proxy mode: API calls go to relative /api/* paths on this origin.
   ...(apiProxyTarget && !process.env.NEXT_PUBLIC_API_URL

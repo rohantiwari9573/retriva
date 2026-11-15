@@ -1,8 +1,11 @@
 /**
  * Headers for an /api auth request the proxy forwards to the API. Only the auth
- * routes run the proxy (see proxy.ts config.matcher); uploads bypass it, and on a
- * self-hosted Next server the API's own Expect/drain handling covers them
- * (backend/app/core/request_size.py).
+ * routes run the proxy (see proxy.ts config.matcher). Uploads bypass it, so a
+ * self-hosted Next server forwards their Expect header; the API copes because it
+ * drains every refused body, Expect or not, up to DRAIN_MAX_BYTES / DRAIN_MAX_SECONDS
+ * (backend/app/core/request_size.py), so a buffering proxy still gets its 413.
+ *
+ * What follows describes why auth requests still drop the header.
  *
  * `Expect: 100-continue` is removed. Next has already answered it to the client and
  * buffered the body, then streams that body upstream regardless; forwarded, the

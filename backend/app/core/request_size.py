@@ -16,10 +16,14 @@ body is read; a body without one (chunked) is counted as it arrives and refused 
 it passes.
 
 Before the 413 is sent, the rest of the body is read and discarded, never stored, up
-to a bound in bytes and time. Closing with unread data in the socket makes the
-client's TCP stack reset the connection, and a reset discards the 413 before the
-client reads it. It has to happen first: once a response is complete, uvicorn's
-receive() reports a disconnect instead of more body.
+to a bound in bytes and time (DRAIN_MAX_BYTES, DRAIN_MAX_SECONDS), with or without
+Expect: 100-continue. Closing with unread data in the socket makes the client's TCP
+stack reset the connection, and a reset discards the 413 before the client reads it.
+It has to happen first: once a response is complete, uvicorn's receive() reports a
+disconnect instead of more body. A body still arriving when the bound is reached can
+therefore end in a reset rather than a readable 413 (a slow client, or one that
+declared more than DRAIN_MAX_BYTES): that is the accepted cost of bounding the work a
+refused request can cause.
 
 A body within the cap must also arrive in time. uvicorn waits for body bytes with no
 timeout (its keep-alive timeout only runs between requests), and FastAPI reads the
@@ -154,19 +158,22 @@ class RequestBodyLimitMiddleware:
             except ValueError:
                 declared = None  # malformed: the server and app reject it as before
             if declared is not None and declared > max_bytes:
-                # Drain so the sender reads the 413 rather than a reset. It runs
-                # whatever the declared size, since it stops at DRAIN_MAX_BYTES/
-                # SECONDS anyway: a proxy that truncated the body (Next.js past
-                # proxyClientMaxBodySize) keeps the original, larger Content-Length,
-                # then goes quiet; closing on it mid-write made the proxy answer 500.
-                # With Expect: 100-continue, reading invites the body (the server
-                # sends 100 on the first read). That is still right within the drain
-                # bound, because a proxy may have answered 100 itself and be sending
-                # already; only a body too large to drain is refused unread, since
-                # draining it would end in a reset either way.
-                expects_continue = headers.get(b"expect", b"").lower() == b"100-continue"
-                if not expects_continue or declared <= DRAIN_MAX_BYTES:
-                    await _drain(receive, already_received=False)
+                # Drain so the sender reads the 413 rather than a reset, whatever the
+                # declared size and whether or not it sent Expect: 100-continue. The
+                # drain stops at DRAIN_MAX_BYTES / DRAIN_MAX_SECONDS / DRAIN_IDLE_SECONDS
+                # and keeps nothing, so a refused request costs at most that much
+                # reading, never memory or disk.
+                #
+                # Expect is not an exception. A proxy in front (a self-hosted Next.js
+                # server, which buffers up to proxyClientMaxBodySize and forwards the
+                # client's Expect and original Content-Length) has usually answered
+                # 100 itself and is already writing; refusing it unread made it hit a
+                # write reset and answer 500 (CI: 100 MiB with Expect, 1 in 5).
+                # Trade-off: reading makes the server send 100 Continue, so a client
+                # that declares more than DRAIN_MAX_BYTES and waits for 100 is invited
+                # to send, and once the bound is reached the connection is closed with
+                # its body unread, which can reset it before it reads the 413.
+                await _drain(receive, already_received=False)
                 await _send_too_large(send, upload=upload)
                 return
 

@@ -63,7 +63,12 @@ flowchart LR
 ```
 
 Website traffic reaches the API from Vercel's addresses, so the TCP peer is the same
-for every visitor. `resolve_client_ip` uses the first source that validates:
+for every visitor. The proxy runs only on `/api/v1/auth/*`, the only routes limited
+per IP; uploads and all other API calls skip it (on Vercel the proxy is a function
+whose request body is capped at ~4.5 MB). Rewrites are case-sensitive
+(`experimental.caseSensitiveRoutes`), so a variant such as `/API/v1/auth/login` is not
+forwarded to the API at all and can't reach login without the proxy.
+`resolve_client_ip` uses the first source that validates:
 
 1. **Signed assertion** from our proxy, when `EDGE_PROXY_SHARED_SECRET` is set. The
    signature covers the timestamp and IP and expires after 60 seconds.

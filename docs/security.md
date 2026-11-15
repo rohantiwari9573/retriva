@@ -206,20 +206,42 @@ body and not sending it. `RequestBodyLimitMiddleware`
 | Whole body, from the start of the request | 30 s (`BODY_MAX_SECONDS`); 600 s for the upload route (`UPLOAD_BODY_MAX_SECONDS`) | 408 `REQUEST_TIMEOUT` |
 
 - **How sizes are enforced:**
-  - A declared `Content-Length` over the cap is refused without reading.
-  - A chunked body is counted as it arrives.
-  - The rest of a refused body is discarded (at most 64 MiB, 15 s, or 2 s
-    without data) before the 413, so the client sees it rather than a reset.
-    This applies whatever size is declared: a proxy that truncated the body keeps
-    the original Content-Length, and closing on it mid-write made Next.js answer
-    500 instead of passing the 413 on.
-  - With `Expect: 100-continue`, a body declared within the drain bound is also
-    drained (the server sends 100 on the first read), because a proxy may have
-    answered 100 itself and be sending already; one declared past the bound is
-    refused without being asked for. The Next.js proxy drops the header before
-    forwarding (it has already answered it and buffered the body), so a proxied
-    upload is always drained and gets its 413. Through the proxy, 26, 40 and 100 MiB uploads,
-    with and without `Expect` and chunked, got 413 in 92 of 92 tries.
+  - A declared `Content-Length` over the cap is refused before the app sees the
+    request: the app is never called, nothing is parsed, stored or queued.
+  - A chunked body is counted as it arrives and refused once it passes the cap.
+  - The rest of a refused body is read and discarded, never kept (at most
+    64 MiB `DRAIN_MAX_BYTES`, 15 s `DRAIN_MAX_SECONDS`, or 2 s without data),
+    before the 413, so the client sees the 413 rather than a reset. This applies
+    whatever size is declared and **whether or not the request carries
+    `Expect: 100-continue`**: a proxy that buffers the body (self-hosted Next.js,
+    up to `proxyClientMaxBodySize`) answers 100 itself, forwards the client's
+    `Expect` and original Content-Length, and is already writing; refusing it
+    unread made it hit a write reset and answer 500.
+  - **Trade-off of draining with `Expect`:** reading the body makes the server
+    send `100 Continue`, so a client that declares more than 64 MiB and waits for
+    100 is invited to start sending; when the drain bound is reached the
+    connection closes with the rest unread and that client may see a reset
+    instead of the 413. The server's work per refused request stays bounded
+    (64 MiB of reading, 15 s), and nothing accumulates in memory or on disk:
+    16 concurrent refused 40 MiB uploads against a real uvicorn server stayed
+    within a bounded allocation peak, left no temp files, and the server kept
+    answering other requests (`tests/unit/test_request_drain_real_server.py`).
+- **Where the Next.js proxy runs:** only on `/api/v1/auth/*` (the per-IP
+  rate-limited routes, which need the signed client-IP assertion). Uploads and
+  all other API calls go through the plain rewrite to the API, never through
+  the proxy function: on Vercel that function caps request bodies at ~4.5 MB,
+  which refused every upload of 4.25 MiB or more while uploads were matched.
+- **Known limitations for non-browser clients** (both also occur on `master`;
+  browsers are unaffected: they send uploads with a Content-Length, no `Expect`,
+  and the UI refuses files over 25 MB before sending):
+  - **Chunked uploads through Vercel:** a `Transfer-Encoding: chunked` upload of
+    about 25 MiB or more is answered by Vercel with 502
+    `ROUTER_EXTERNAL_TARGET_CONNECTION_ERROR` before it reaches the API (the
+    same request sent directly to the API works). Chunked uploads are not a
+    supported way to upload documents through the website.
+  - **Slow oversized uploads over HTTP/1.1** (for example curl) that take longer
+    than the drain bound (~15 s) can end in a connection reset instead of the
+    413. Over HTTP/2 (browsers on Vercel) the 413 was delivered in every test.
 - **What the timeouts cover:** a body that stops arriving, or trickles past its
   deadline, gets a 408 with `connection: close`. Once the body is complete,
   nothing is timed, so streamed chat responses may run and pause freely.

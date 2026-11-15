@@ -329,11 +329,13 @@ async def test_a_body_with_expect_within_the_drain_bound_is_drained() -> None:
     assert consumed == 10
 
 
-async def test_a_client_waiting_for_100_continue_is_not_asked_for_an_undrainable_body(
+async def test_a_body_with_expect_declared_past_the_drain_bound_is_drained_up_to_it(
     monkeypatch,
 ) -> None:
-    """Past the drain bound the connection resets anyway, so reading would only invite
-    an upload that can't end in a readable 413."""
+    """A self-hosted Next.js proxy answers 100 Continue itself, buffers up to its own
+    limit and forwards Expect with the original Content-Length (say 100 MiB). Refusing
+    that unread made Next hit a write reset and answer 500, so it is drained like any
+    other refused body, and only up to the same byte bound."""
     monkeypatch.setattr("app.core.request_size.DRAIN_MAX_BYTES", 2000)
 
     status, consumed = await _run_raw(
@@ -341,7 +343,27 @@ async def test_a_client_waiting_for_100_continue_is_not_asked_for_an_undrainable
     )
 
     assert status == 413
-    assert consumed == 0
+    assert 0 < consumed <= 2000 // 500 + 2
+
+
+@pytest.mark.parametrize("expect", [None, b"100-continue", b"100-Continue"])
+@pytest.mark.parametrize("declared_vs_bound", [-1, 0, 1])
+async def test_drain_is_the_same_with_and_without_expect_around_the_drain_bound(
+    monkeypatch, expect: bytes | None, declared_vs_bound: int
+) -> None:
+    """Declared just below, at and just above DRAIN_MAX_BYTES: always drained, never
+    past the bound, always a 413, Expect or not."""
+    bound = 5000
+    monkeypatch.setattr("app.core.request_size.DRAIN_MAX_BYTES", bound)
+    declared = bound + declared_vs_bound * 500
+    headers = [(b"expect", expect)] if expect else []
+
+    status, consumed = await _run_raw(
+        content_length=declared, chunks=declared // 500, extra_headers=headers
+    )
+
+    assert status == 413
+    assert consumed == min(declared, bound + 500) // 500
 
 
 async def test_a_body_declared_past_the_drain_bound_is_drained_only_up_to_it(

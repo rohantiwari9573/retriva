@@ -8,6 +8,17 @@ import nextConfig from "../../next.config";
 // MAX_DOCUMENT_SIZE_MB (25) MiB + MULTIPART_OVERHEAD_BYTES (1 MiB).
 const API_MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024 + 1024 * 1024;
 
+describe("next.config caseSensitiveRoutes", () => {
+  it("is on, so only the exact /api/ prefix is rewritten to the API", () => {
+    // The proxy matcher (/api/v1/auth/:path*) is case-sensitive; rewrites are not by
+    // default. Off, /API/v1/auth/login skipped the proxy (no signed client IP, so the
+    // per-IP login limit keyed on Vercel's egress IPs) yet still reached the API's
+    // login route. Next's config-testing helper does not model this flag, so the
+    // runtime behaviour is checked against a real `next start` and on Vercel.
+    expect(nextConfig.experimental?.caseSensitiveRoutes).toBe(true);
+  });
+});
+
 describe("next.config proxyClientMaxBodySize", () => {
   it("lets an oversized upload reach the API so it can answer 413", () => {
     // Parsed the way Next parses it. Next truncates a body at this limit, so if it
