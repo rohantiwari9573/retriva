@@ -456,3 +456,34 @@ async def test_startup_sweep_requeues_freshly_queued_documents_except_our_own(
     assert orphaned in startup.requeued
     assert ours not in startup.requeued
     assert claimed not in startup.requeued  # a live lease is still respected
+
+
+async def test_a_parse_longer_than_the_lease_keeps_its_lease(
+    fake_storage, org, providers, monkeypatch
+):
+    """Reviewer finding: no heartbeat while parsing, so a slow (legitimate) parse
+    outlived its lease and the sweep or a redelivered task re-claimed it under a
+    live worker. The background heartbeat keeps it held for the whole parse."""
+    from app.ingestion import isolated
+
+    monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_LEASE_SECONDS", 4)  # beat every 1 s
+    real_parse = isolated.parse_and_chunk
+    stolen: list[bool] = []
+
+    async def slow_parse(path, mime_type, workdir):
+        await asyncio.sleep(6)  # 1.5x the lease, with no step-boundary heartbeat
+        async with _factory() as session_factory:
+            stolen.append(await lease.claim(session_factory, document_id) is not None)
+        return await real_parse(path, mime_type, workdir)
+
+    monkeypatch.setattr(isolated, "parse_and_chunk", slow_parse)
+    document_id = await _make_document(fake_storage, *org)
+
+    result = await asyncio.to_thread(runner.run_attempt, str(document_id))
+
+    assert stolen == [False]
+    assert result.kind == runner.AttemptKind.DONE
+    document = await _fetch(document_id)
+    assert document.status == DocumentStatus.READY
+    assert document.processing_attempts == 1
+    assert len(await _chunks(document_id)) == document.chunk_count

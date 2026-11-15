@@ -344,7 +344,7 @@ def test_large_docx_xml_is_parsed_in_bounded_memory(monkeypatch):
 
 def test_markdown_one_character_lines_are_bounded(monkeypatch):
     """Millions of tiny lines used to become one list of str objects before the
-    length check (~420 MiB for 25 MB). Elements are now capped in size."""
+    length check (~420 MiB for 25 MB). Lines are now joined as they arrive."""
     import tracemalloc
 
     monkeypatch.setattr(settings, "MAX_DOCUMENT_TEXT_LENGTH", 5_000_000)
@@ -355,10 +355,95 @@ def test_markdown_one_character_lines_are_bounded(monkeypatch):
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert sum(len(e.text) for e in result.elements) == 2_000_000 * 2 - 1 - (
-        len(result.elements) - 1
-    )
+    assert [len(e.text) for e in result.elements] == [2_000_000 * 2 - 1]
     assert peak < 60 * 1024 * 1024, f"peak {peak / 1048576:.0f} MiB"
+
+
+def _original_markdown_parse(data: bytes):
+    """The whole-text implementation the streaming parser replaced (commit
+    612e446), kept verbatim as the reference its output must match."""
+    from app.ingestion.parsers.base import ParsedDocument, ParsedElement
+    from app.ingestion.parsers.markdown import _HEADING_RE
+
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    elements: list[ParsedElement] = []
+    heading_stack: list[str] = []
+    buffer: list[str] = []
+
+    def flush() -> None:
+        content = "\n".join(buffer).strip()
+        buffer.clear()
+        if content:
+            titled = [h for h in heading_stack if h]
+            section = " > ".join(titled) if titled else None
+            elements.append(ParsedElement(text=content, section=section))
+
+    for line in lines:
+        match = _HEADING_RE.match(line)
+        if match:
+            flush()
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            del heading_stack[level - 1 :]
+            while len(heading_stack) < level - 1:
+                heading_stack.append("")
+            heading_stack.append(title)
+        else:
+            buffer.append(line)
+    flush()
+    return ParsedDocument(elements=elements)
+
+
+_MD_ALPHABET = [
+    "a",
+    "b",
+    "é",
+    "€",
+    "𝄞",
+    "\n",
+    "\r",
+    "\r\n",
+    "\x0b",
+    "\x0c",
+    "\x1c",
+    "\x85",
+    "\u2028",
+    "# ",
+    "## ",
+    "#### ",
+    "\n\n",
+    " ",
+    "\t",
+]
+
+
+@pytest.mark.parametrize("block_bytes", [1, 2, 3, 5, 7, 64])
+def test_markdown_streaming_matches_the_original_parser(monkeypatch, block_bytes):
+    """Randomized differential test against the original implementation, with
+    tiny decode blocks so every line break, heading marker and multi-byte
+    character lands on a block boundary somewhere."""
+    import random
+
+    from app.ingestion.parsers import base
+
+    monkeypatch.setattr(base, "TEXT_BLOCK_BYTES", block_bytes)
+    rng = random.Random(block_bytes)
+    for _ in range(1500):
+        text = "".join(rng.choice(_MD_ALPHABET) for _ in range(rng.randint(0, 60)))
+        assert MarkdownParser().parse(text.encode()) == _original_markdown_parse(text.encode()), (
+            repr(text)
+        )
+
+
+def test_markdown_large_sections_match_the_original_parser():
+    """Sections far larger than one 1 MiB decode block (and than any element
+    size cap) keep the original element boundaries, so chunks are unchanged."""
+    section = ("word " * 10 + "\n") * 30_000  # ~1.6 MB, crosses block boundaries
+    text = "# Intro\n" + section + "## Part\r\n" + section + "tail é€𝄞\n" * 1000
+    data = text.encode()
+    expected = _original_markdown_parse(data)
+    assert len(expected.elements) == 2
+    assert MarkdownParser().parse(data) == expected
 
 
 @pytest.mark.parametrize(

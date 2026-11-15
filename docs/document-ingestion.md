@@ -65,6 +65,32 @@ bound how many documents are processed at once.
   ~25 KB as a list of Python floats) and chunks are inserted with batched Core
   INSERTs of `DOCUMENT_INSERT_BATCH_SIZE` rows, not thousands of ORM objects.
 
+**Parser isolation:** per-format checks alone did not bound the parsers. An
+adversarial review found files that defeated them: a DOCX whose content sits in
+one table or one giant paragraph (the streaming parser can only free it at the
+end), an oversized `_rels/.rels`, a PDF of 500 pages each just under the stream
+cap, and millions of tiny elements. Parsing and chunking therefore run in a child
+process (`app/ingestion/isolated.py`, `python -m app.ingestion.isolated`). The
+child:
+- caps its own data segment with `RLIMIT_DATA` as its first action, at
+  `DOCUMENT_PARSE_MEMORY_LIMIT_MB` (default 224). Measured peak RSS is about the
+  limit plus 17 MiB;
+- is killed after `DOCUMENT_PARSE_TIMEOUT_SECONDS` (default 120);
+- hands back only the chunks, through a file in the document's private work dir.
+
+An overrun is a `MemoryError` inside the child, or a kill. Either way the
+document fails permanently with a clear reason ("too large or complex to process
+within the memory limit" / "took too long"), because it would fail the same way
+on every retry. The API or worker process never sees the overrun. A cancelled
+parse (shutdown) kills and reaps the child. The runtime-adjustable limits
+(text length, pages, DOCX size, PDF stream size, chunk size and overlap,
+`MAX_CHUNKS_PER_DOCUMENT`) are passed to the child, and the chunker stops as soon
+as a document passes `MAX_CHUNKS_PER_DOCUMENT`. Separately from isolation, the
+DOCX package's relationships part is capped at 1 MiB.
+`DOCUMENT_PARSE_ISOLATION=false` parses in-process instead (development only;
+it removes the memory bound). The limit is enforced on Linux; Windows has no
+`RLIMIT_DATA`, so there the child runs without the memory cap.
+
 **Per process:** inline mode runs at most `DOCUMENT_PROCESSING_CONCURRENCY`
 documents at once (default 1) on a dedicated executor; others wait in memory,
 queued, and retry backoff is slept with no slot held. In Celery mode the worker's
@@ -72,15 +98,22 @@ own `--concurrency` bounds it.
 
 **Measured** (API container capped at 512 MB, no swap; cgroup `memory.peak`):
 
-| Scenario | Before | After |
+| Scenario | Before | After (with parser isolation) |
 |---|---|---|
-| Five 25 MiB PDFs uploaded at once | 461 MiB | 272 MiB |
-| Five large failed PDFs retried at once | OOM-killed | 274 MiB, all READY |
-| Five 3.8 MB text-heavy PDFs (1,950 chunks each) | OOM-killed | 188 MiB, all READY |
-| One text-heavy PDF | OOM-killed (chunker loop) | 174 MiB, READY |
-| 25 MB Markdown of one-character lines | 420 MiB | 204 MiB, rejected early |
+| Five 25 MiB PDFs uploaded at once | 461 MiB | 276 MiB, all READY |
+| Five large failed PDFs retried at once | OOM-killed | 272 MiB, all READY |
+| Five 3.8 MB text-heavy PDFs (1,950 chunks each) | OOM-killed | 222 MiB, all READY in 57 s |
+| One text-heavy PDF | OOM-killed (chunker loop) | 171 MiB, READY |
+| 25 MB Markdown of one-character lines | 420 MiB | 236 MiB, rejected early |
 | 390 KB DOCX holding 95 MB of XML | 433 MiB | 171 MiB, rejected early |
-| 0.8 MB PDF decompression bomb | 263 MiB | 172 MiB, rejected |
+| 0.8 MB PDF decompression bomb | 263 MiB | 171 MiB, rejected |
+| Review files: 95 MB of XML in one DOCX table / one paragraph / 2.6M tiny paragraphs | unbounded at `573cf0c` (review) | 334-336 MiB, FAILED (memory limit) |
+| Review files: DOCX with a 90 MB `.rels`; 500-page PDF, each page just under the stream cap | unbounded at `573cf0c` (review) | 171 / 338 MiB, FAILED with reason |
+| That PDF parsing while five 25 MiB PDFs upload and process | - | 363 MiB, PDF FAILED, five READY |
+
+The "After" column includes the parse child, which runs in the same container.
+Its limit (224 MiB) is what sets the ~335 MiB worst case, leaving about 175 MiB
+of headroom on 512 MB.
 
 With `DOCUMENT_PROCESSING_CONCURRENCY=2` the same scenarios peaked at
 223-292 MB and five text-heavy PDFs finished in 40 s instead of 54 s. 1 is the
@@ -500,6 +533,14 @@ something this phase needed.
 - A document that was queued in memory when an inline-mode API stopped is
   re-queued by the next process's startup sweep; one whose claim was still live
   waits for its lease to expire (default 600 s) plus one sweep interval.
+- A valid but very complex document (for example ~95 MB of DOCX table XML) that
+  needs more than `DOCUMENT_PARSE_MEMORY_LIMIT_MB` to parse fails rather than
+  being processed. Raising the limit trades API headroom for it, since the child
+  shares the instance's memory with the API while it runs.
+- Each document pays a child-process start for its parse: about 50 MiB RSS and
+  1.3 s (median of 10, Docker Desktop with a bind-mounted source tree), mostly
+  importing the app's settings and parsers. It is slower on a fractional-CPU
+  instance.
 - Embeddings are still requested in groups and held for the whole document
   (float32, ~3 KB per chunk) until the final transaction, so memory per document
   grows with its chunk count, which `MAX_CHUNKS_PER_DOCUMENT` bounds.

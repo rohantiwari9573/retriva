@@ -25,6 +25,8 @@ the download and every embedding call) and held every chunk's ORM object and
 Python-float vector at once.
 """
 
+import asyncio
+import contextlib
 import os
 import tempfile
 import time
@@ -46,14 +48,12 @@ from app.core.metrics import (
     document_processing_duration_seconds,
 )
 from app.core.telemetry import get_tracer
-from app.ingestion import lease
-from app.ingestion.chunking import Chunk, chunk_document
+from app.ingestion import isolated, lease
+from app.ingestion.chunking import Chunk
 from app.ingestion.errors import (
-    EmptyDocumentError,
     PermanentProcessingError,
     TransientProcessingError,
 )
-from app.ingestion.parsers.registry import get_parser_for_mime_type
 from app.ingestion.schema_check import assert_embedding_dimension_matches
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
@@ -177,11 +177,13 @@ async def _run_claimed(
         async with session_factory() as session:
             await assert_embedding_dimension_matches(session, embedding_provider.dimensions)
 
-        chunks = await _download_parse_and_chunk(claim, storage)
+        async with _keep_lease_alive(claim, session_factory):
+            chunks = await _download_parse_and_chunk(claim, storage)
         if not await lease.heartbeat(session_factory, claim):
             return _superseded(claim, "after parsing")
 
-        vectors = await _embed(claim, chunks, embedding_provider, session_factory)
+        async with _keep_lease_alive(claim, session_factory):
+            vectors = await _embed(claim, chunks, embedding_provider, session_factory)
         if vectors is None:
             return _superseded(claim, "while embedding")
 
@@ -237,46 +239,41 @@ async def _parse_and_chunk_in(
     except StorageError as exc:
         raise TransientProcessingError(str(exc)) from exc
 
-    with tracer.start_as_current_span("document.parse"):
+    # Parse + chunk in a memory- and time-limited child process (see
+    # app/ingestion/isolated.py): a crafted file can only kill the child.
+    with tracer.start_as_current_span("document.parse") as span:
         parse_start = time.perf_counter()
-        parser = get_parser_for_mime_type(claim.mime_type)
-        parsed = parser.parse_file(path)
-        document_parse_duration_seconds.labels(document_type=claim.mime_type).observe(
-            time.perf_counter() - parse_start
-        )
-
-    if not parsed.elements:
-        raise EmptyDocumentError("Document contains no extractable text.")
-
-    # Parsers stop as soon as the text budget is exceeded; this check stays as a
-    # backstop for any parser that doesn't charge the budget.
-    total_text_length = sum(len(el.text) for el in parsed.elements)
-    if total_text_length > settings.MAX_DOCUMENT_TEXT_LENGTH:
-        raise PermanentProcessingError(
-            f"Document contains {total_text_length} characters of extracted "
-            f"text, exceeding the {settings.MAX_DOCUMENT_TEXT_LENGTH}-character "
-            "processing limit."
-        )
-
-    with tracer.start_as_current_span("document.chunk") as chunk_span:
-        chunk_start = time.perf_counter()
-        chunks = chunk_document(
-            parsed,
-            chunk_size_tokens=settings.CHUNK_SIZE_TOKENS,
-            chunk_overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
-        )
-        del parsed
-        document_chunk_duration_seconds.observe(time.perf_counter() - chunk_start)
-        chunk_span.set_attribute("document.chunk_count", len(chunks))
-
-    if not chunks:
-        raise EmptyDocumentError("Document contains no extractable text.")
-    if len(chunks) > settings.MAX_CHUNKS_PER_DOCUMENT:
-        raise PermanentProcessingError(
-            f"Document produced {len(chunks)} chunks, exceeding the "
-            f"{settings.MAX_CHUNKS_PER_DOCUMENT}-chunk processing limit."
-        )
+        chunks = await isolated.parse_and_chunk(path, claim.mime_type, workdir)
+        elapsed = time.perf_counter() - parse_start
+        document_parse_duration_seconds.labels(document_type=claim.mime_type).observe(elapsed)
+        document_chunk_duration_seconds.observe(elapsed)
+        span.set_attribute("document.chunk_count", len(chunks))
     return chunks
+
+
+@contextlib.asynccontextmanager
+async def _keep_lease_alive(
+    claim: "lease.Claim", session_factory: async_sessionmaker[AsyncSession]
+):
+    """Heartbeats in the background while long steps run (download, parse in the
+    child process, embedding), so a slow but legitimate document keeps its lease
+    and is never re-queued under a live worker. Heartbeat failures are ignored
+    here: the step-boundary heartbeats decide whether we still hold the lease."""
+    interval = max(1.0, min(60.0, settings.DOCUMENT_PROCESSING_LEASE_SECONDS / 4))
+
+    async def beat() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            with contextlib.suppress(Exception):
+                await lease.heartbeat(session_factory, claim)
+
+    task = asyncio.create_task(beat())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def _embed(

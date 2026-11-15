@@ -135,6 +135,13 @@ class Settings(BaseSettings):
     # 75 MB). Text content streams of real documents are far smaller; images are
     # not decompressed during text extraction.
     PDF_MAX_DECOMPRESSED_STREAM_BYTES: int = 10_000_000
+    # Parsing and chunking run in a child process limited to this much data
+    # memory and this long (app/ingestion/isolated.py): a crafted file can only
+    # kill the child, and fails permanently with a clear reason. The API/worker
+    # process's memory is never at risk from parser behaviour.
+    DOCUMENT_PARSE_ISOLATION: bool = True
+    DOCUMENT_PARSE_MEMORY_LIMIT_MB: int = Field(default=224, ge=64)
+    DOCUMENT_PARSE_TIMEOUT_SECONDS: int = Field(default=120, ge=5)
     RETRIEVAL_TOP_K: int = 8
     RETRIEVAL_CANDIDATE_POOL: int = 30
     MAX_CONTEXT_TOKENS: int = 3000

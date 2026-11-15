@@ -29,6 +29,8 @@ _OFFICE_DOCUMENT_REL = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
 )
 _MAX_STYLES_XML_BYTES = 10 * 1024 * 1024
+# A real package's _rels/.rels is a few hundred bytes.
+_MAX_RELS_XML_BYTES = 1024 * 1024
 
 
 def _run_text(run: etree._Element) -> str:
@@ -72,8 +74,10 @@ def _paragraph_style_id(paragraph: etree._Element) -> str | None:
 
 
 def _paragraph_styles(archive: zipfile.ZipFile) -> tuple[dict[str, str], str]:
-    """styleId -> name for paragraph styles, and the default paragraph style's name
-    (what python-docx's Paragraph.style falls back to)."""
+    """styleId -> name for paragraph styles, and the default paragraph style's name,
+    resolved the way python-docx does: only direct w:style children of w:styles;
+    for each styleId the FIRST such style; a style of another type means "use the
+    default"; the default is the LAST paragraph style marked default."""
     names: dict[str, str] = {}
     default = ""
     try:
@@ -83,28 +87,36 @@ def _paragraph_styles(archive: zipfile.ZipFile) -> tuple[dict[str, str], str]:
     if info.file_size > _MAX_STYLES_XML_BYTES:
         raise ParsingError("DOCX styles part is unreasonably large.")
     root = etree.fromstring(archive.read(info), parser=etree.XMLParser(resolve_entities=False))
-    for style in root.iter(f"{_W}style"):
-        if style.get(f"{_W}type") != "paragraph":
+    seen: set[str] = set()
+    for style in root:
+        if style.tag != f"{_W}style":
             continue
         name_el = style.find(f"{_W}name")
-        name = name_el.get(f"{_W}val", "") if name_el is not None else ""
+        name = (name_el.get(f"{_W}val") if name_el is not None else None) or ""
+        is_paragraph = style.get(f"{_W}type") == "paragraph"
         style_id = style.get(f"{_W}styleId")
-        if style_id is not None:
-            names[style_id] = name
-        if style.get(f"{_W}default") in ("1", "true", "on"):
+        if style_id is not None and style_id not in seen:
+            seen.add(style_id)
+            if is_paragraph:
+                names[style_id] = name
+        if is_paragraph and style.get(f"{_W}default") in ("1", "true", "on"):
             default = name
     return names, default
 
 
 def _main_part_name(archive: zipfile.ZipFile) -> str:
     try:
-        rels = etree.fromstring(
-            archive.read("_rels/.rels"), parser=etree.XMLParser(resolve_entities=False)
-        )
+        info = archive.getinfo("_rels/.rels")
+    except KeyError:
+        return "word/document.xml"
+    if info.file_size > _MAX_RELS_XML_BYTES:
+        raise ParsingError("DOCX package relationships part is unreasonably large.")
+    try:
+        rels = etree.fromstring(archive.read(info), parser=etree.XMLParser(resolve_entities=False))
         for rel in rels.iter(f"{_REL_NS}Relationship"):
             if rel.get("Type") == _OFFICE_DOCUMENT_REL and rel.get("TargetMode") != "External":
                 return rel.get("Target", "word/document.xml").lstrip("/")
-    except (KeyError, etree.XMLSyntaxError):
+    except etree.XMLSyntaxError:
         pass
     return "word/document.xml"
 

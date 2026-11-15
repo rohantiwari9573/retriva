@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from sqlalchemy import CursorResult, and_, func, or_, select, update
+from sqlalchemy import CursorResult, and_, func, or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
@@ -236,6 +236,11 @@ async def sweep(
                         and_(Document.processing_token.is_not(None), _lease_expired()),
                     ),
                 )
+                .where(
+                    # Excluded in SQL, before LIMIT, so this process's own queue
+                    # can never crowd other stale rows out of a sweep.
+                    Document.id.notin_([uuid.UUID(i) for i in exclude]) if exclude else true()
+                )
                 .order_by(Document.processing_heartbeat_at.asc().nulls_first())
                 .limit(limit)
             )
@@ -244,8 +249,6 @@ async def sweep(
         requeued: list[uuid.UUID] = []
         failed: list[uuid.UUID] = []
         for row in rows:
-            if str(row.id) in exclude:
-                continue
             unchanged = and_(
                 Document.id == row.id,
                 Document.status == DocumentStatus.PROCESSING,

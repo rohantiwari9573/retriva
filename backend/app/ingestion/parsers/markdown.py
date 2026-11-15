@@ -11,8 +11,9 @@ spec) of the nearest preceding headings at each level.
 Memory: the file is decoded in blocks against the document's text budget and
 consumed line by line (never one list of every line: 25 MB of one-character
 lines made millions of string objects, ~420 MiB, before the length check). An
-element is also closed once it has buffered _MAX_ELEMENT_CHARS of text, so a
-heading-less file can't build one unbounded line buffer.
+element's lines are joined into one StringIO as they arrive, so its memory is
+its text (bounded by the text budget), not one object per line. Elements are
+exactly what the original whole-text implementation produced.
 """
 
 import io
@@ -23,7 +24,6 @@ from typing import BinaryIO
 from app.ingestion.parsers.base import ParsedDocument, ParsedElement, TextBudget, iter_utf8_text
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
-_MAX_ELEMENT_CHARS = 20_000
 
 
 def _lines(blocks: Iterator[str]) -> Iterator[str]:
@@ -55,14 +55,15 @@ class MarkdownParser:
     def parse_stream(self, file: BinaryIO) -> ParsedDocument:
         elements: list[ParsedElement] = []
         heading_stack: list[str] = []  # index i = heading text at level i+1
-        buffer: list[str] = []
-        buffered = 0
+        # The current element's "\n".join(lines), built incrementally.
+        buffer = io.StringIO()
+        has_lines = False
 
         def flush() -> None:
-            nonlocal buffered
-            content = "\n".join(buffer).strip()
-            buffer.clear()
-            buffered = 0
+            nonlocal buffer, has_lines
+            content = buffer.getvalue().strip()
+            buffer = io.StringIO()
+            has_lines = False
             if content:
                 titled = [h for h in heading_stack if h]
                 section = " > ".join(titled) if titled else None
@@ -79,10 +80,10 @@ class MarkdownParser:
                     heading_stack.append("")
                 heading_stack.append(title)
             else:
-                buffer.append(line)
-                buffered += len(line) + 1
-                if buffered >= _MAX_ELEMENT_CHARS:
-                    flush()
+                if has_lines:
+                    buffer.write("\n")
+                buffer.write(line)
+                has_lines = True
         flush()
 
         return ParsedDocument(elements=elements)

@@ -34,6 +34,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+from app.ingestion.errors import PermanentProcessingError
 from app.ingestion.normalization import normalize_text
 from app.ingestion.parsers.base import ParsedDocument
 
@@ -125,7 +126,11 @@ def chunk_document(
     *,
     chunk_size_tokens: int,
     chunk_overlap_tokens: int,
+    max_chunks: int | None = None,
 ) -> list[Chunk]:
+    """max_chunks: stop as soon as the document would exceed it (raising the same
+    PermanentProcessingError the pipeline used to raise after chunking it all),
+    so a document of millions of tiny paragraphs isn't chunked to the end first."""
     units: list[_Unit] = []
     for paragraph in _paragraphs(document):
         if paragraph.token_count > chunk_size_tokens:
@@ -145,6 +150,11 @@ def chunk_document(
     def flush() -> None:
         if not current:
             return
+        if max_chunks is not None and len(chunks) >= max_chunks:
+            raise PermanentProcessingError(
+                f"Document produced more than {max_chunks} chunks, exceeding the "
+                f"{max_chunks}-chunk processing limit."
+            )
         content = "\n\n".join(u.text for u in current)
         first = current[0]
         chunks.append(
