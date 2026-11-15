@@ -199,6 +199,7 @@ async def sweep(
     *,
     exclude: set[str] | frozenset[str] = frozenset(),
     limit: int = 100,
+    queue_stale_seconds: int | None = None,
 ) -> SweepResult:
     """Re-queues stale PROCESSING documents, or fails those out of attempts.
 
@@ -207,8 +208,14 @@ async def sweep(
     DOCUMENT_PROCESSING_LEASE_SECONDS, or a NULL heartbeat (stranded before the
     lease columns existed). `exclude` holds ids this process has scheduled
     itself (queued in memory, waiting for a slot), which are not stale.
+    `queue_stale_seconds` overrides the queue threshold (0 at inline startup).
     """
-    queue_stale = func.now() - timedelta(seconds=settings.DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS)
+    stale_after = (
+        settings.DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS
+        if queue_stale_seconds is None
+        else queue_stale_seconds
+    )
+    queue_stale = func.now() - timedelta(seconds=stale_after)
     async with session_factory() as session:
         rows = (
             await session.execute(
@@ -224,7 +231,7 @@ async def sweep(
                         Document.processing_heartbeat_at.is_(None),
                         and_(
                             Document.processing_token.is_(None),
-                            Document.processing_heartbeat_at < queue_stale,
+                            Document.processing_heartbeat_at <= queue_stale,
                         ),
                         and_(Document.processing_token.is_not(None), _lease_expired()),
                     ),

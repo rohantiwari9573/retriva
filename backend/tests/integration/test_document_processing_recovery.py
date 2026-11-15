@@ -436,3 +436,23 @@ async def test_inline_runner_bounds_concurrent_processing(
     assert _SlowProvider.max_in_flight == concurrency
     for doc_id in docs:
         assert (await _fetch(doc_id)).status == DocumentStatus.READY
+
+
+async def test_startup_sweep_requeues_freshly_queued_documents_except_our_own(
+    fake_storage, org, monkeypatch
+):
+    """After a restart in inline mode, documents that were queued in the dead
+    process's memory are re-queued at once, not after the 30-minute queue limit."""
+    monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS", 1800)
+    orphaned = await _make_document(fake_storage, *org)  # queued just now, no claim
+    ours = await _make_document(fake_storage, *org)
+    claimed = await _make_document(fake_storage, *org, processing_token=uuid.uuid4())
+
+    async with _factory() as factory:
+        regular = await lease.sweep(factory, exclude={str(ours)})
+        startup = await lease.sweep(factory, exclude={str(ours)}, queue_stale_seconds=0)
+
+    assert orphaned not in regular.requeued
+    assert orphaned in startup.requeued
+    assert ours not in startup.requeued
+    assert claimed not in startup.requeued  # a live lease is still respected
