@@ -1,4 +1,4 @@
-"""Parsing and chunking in a separate, memory- and time-limited process.
+"""Parsing and chunking in a separate, resource-limited process.
 
 Parsers are third-party code (pypdf, lxml) fed attacker-controlled files, and
 memory blow-ups were found that no single per-format check bounded: a DOCX whose
@@ -6,28 +6,44 @@ content sits in one table or one giant paragraph, an oversized package part, a
 PDF whose 500 pages each sit just under the stream cap, millions of tiny
 elements. Rather than chase each one in-process (where an overrun kills the API
 or worker, and with it every other request), each document is parsed and chunked
-in a child process that:
+in a child process that, as its first actions:
 
-- limits its own data segment (RLIMIT_DATA, DOCUMENT_PARSE_MEMORY_LIMIT_MB) as its
-  first action, so an overrun is a MemoryError inside the child;
-- is killed after DOCUMENT_PARSE_TIMEOUT_SECONDS (quadratic-time inputs);
-- returns only the chunks (bounded by MAX_CHUNKS_PER_DOCUMENT and
-  MAX_DOCUMENT_TEXT_LENGTH) through a file in the document's private work dir.
+- limits its data segment (RLIMIT_DATA, DOCUMENT_PARSE_MEMORY_LIMIT_MB), so an
+  overrun is a MemoryError inside the child;
+- limits its CPU time (RLIMIT_CPU, DOCUMENT_PARSE_TIMEOUT_SECONDS) - CPU time, not
+  wall time, so a busy instance doesn't fail a valid document;
+- limits the size of any file it writes (RLIMIT_FSIZE);
+- asks the kernel to kill it if the parent dies (PR_SET_PDEATHSIG), so a parse is
+  never left running unsupervised;
+- silences warning logs (pypdf can log tens of MB per page for crafted files).
 
-A document that exceeds either limit fails permanently with a clear reason: it
-would fail the same way on every retry, so it is never retried (no repeated
-crash cycles). The parent's own memory is unaffected either way.
+Its stderr goes to a file in the document's private work dir, of which only the
+tail is read, never to a pipe the parent buffers; the chunks come back as JSON
+lines through a file in the same dir. The child gets a minimal environment (no
+secrets) and runs in the work dir, so no .env file is read either.
 
-Protocol: `python -m app.ingestion.isolated <in> <mime> <out.json> <limits.json>`
-writes {"chunks": [...]} or {"error": {"type": ..., "message": ...}} to <out>.
+Outcomes:
+- the document's own fault (parse error, too much text, memory or CPU limit
+  reached) -> permanent failure with a clear reason, never retried;
+- anything else (killed from outside, e.g. by the kernel when the whole instance
+  was short of memory; a wall-clock stall; a crash; disk full) -> transient, so
+  the attempt limit bounds the retries and a valid document isn't failed for an
+  instance-wide problem.
+
+Protocol: `python -m app.ingestion.isolated <in> <mime> <out.jsonl> <limits.json>`
+writes a status line ({"ok": true} or {"error": {"type", "message"}}) followed,
+on success, by one chunk per line.
 """
 
 import asyncio
 import json
 import os
+import signal
 import sys
 from dataclasses import asdict
 from pathlib import Path
+
+import structlog
 
 from app.core.config import settings
 from app.ingestion.chunking import Chunk
@@ -36,12 +52,21 @@ from app.ingestion.errors import (
     ParsingError,
     PermanentProcessingError,
     TextLimitExceededError,
+    TransientProcessingError,
 )
+
+logger = structlog.get_logger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 _ERRORS = {
     cls.__name__: cls
-    for cls in (ParsingError, TextLimitExceededError, EmptyDocumentError, PermanentProcessingError)
+    for cls in (
+        ParsingError,
+        TextLimitExceededError,
+        EmptyDocumentError,
+        PermanentProcessingError,
+        TransientProcessingError,
+    )
 }
 # Settings the child must see (tests and operators change them at runtime).
 _LIMIT_SETTINGS = (
@@ -53,69 +78,139 @@ _LIMIT_SETTINGS = (
     "CHUNK_OVERLAP_TOKENS",
     "MAX_CHUNKS_PER_DOCUMENT",
 )
+# Environment the child keeps; everything else (credentials) is dropped.
+_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SYSTEMROOT",  # Windows: needed to start Python at all
+    "VIRTUAL_ENV",
+    "PYTHONHOME",
+    "ENVIRONMENT",
+)
 MEMORY_LIMIT_REASON = "This document is too large or complex to process within the memory limit."
 TIME_LIMIT_REASON = "This document took too long to process and was stopped."
-_SIGKILLED = -9  # asyncio returncode of a child killed by SIGKILL (e.g. the OOM killer)
+OUTPUT_LIMIT_REASON = "This document produced too much output to process."
+_OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024  # chunks (<= 5M chars of text) stay far below
+_STDERR_TAIL_BYTES = 2000
+
+
+def _signal_exit(name: str) -> int | None:
+    """asyncio's returncode for a child killed by this signal (None on Windows)."""
+    sig = getattr(signal, name, None)
+    return -int(sig) if sig is not None else None
 
 
 async def parse_and_chunk(path: str, mime_type: str, workdir: str) -> list[Chunk]:
     """Parses and chunks `path` in a limited child process (or in-process when
     DOCUMENT_PARSE_ISOLATION is off). Raises the same permanent errors the
-    in-process parsers do, plus ParsingError for a memory or time overrun."""
+    in-process parsers do, plus ParsingError for a memory or CPU overrun and
+    TransientProcessingError when the child was stopped for reasons outside it."""
     if not settings.DOCUMENT_PARSE_ISOLATION:
         return await asyncio.to_thread(_parse_and_chunk, path, mime_type)
 
-    out_path = os.path.join(workdir, "chunks.json")
+    out_path = os.path.join(workdir, "chunks.jsonl")
     limits_path = os.path.join(workdir, "limits.json")
+    stderr_path = os.path.join(workdir, "parser-stderr.log")
     with open(limits_path, "w", encoding="utf-8") as f:
         json.dump({name: getattr(settings, name) for name in _LIMIT_SETTINGS}, f)
 
-    env = dict(os.environ)
-    env["MALLOC_ARENA_MAX"] = "2"  # one parsing thread; don't reserve arenas
-    env["DOCUMENT_PARSE_MEMORY_LIMIT_MB"] = str(settings.DOCUMENT_PARSE_MEMORY_LIMIT_MB)
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "app.ingestion.isolated",
-        path,
-        mime_type,
-        out_path,
-        limits_path,
-        cwd=str(_BACKEND_ROOT),
-        env=env,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        _, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=settings.DOCUMENT_PARSE_TIMEOUT_SECONDS
+    with open(stderr_path, "wb") as stderr_file:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "app.ingestion.isolated",
+            os.path.abspath(path),
+            mime_type,
+            out_path,
+            limits_path,
+            cwd=workdir,
+            env=_child_env(),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=stderr_file,
         )
+    try:
+        await asyncio.wait_for(process.wait(), timeout=settings.DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS)
     except TimeoutError:
         process.kill()
         await process.wait()
-        raise ParsingError(TIME_LIMIT_REASON) from None
+        # CPU time is limited in the child; a wall-clock stall means the instance
+        # was starved (or the child blocked), not that the document is bad.
+        raise TransientProcessingError(
+            "Parsing did not finish in time on a busy instance; it will be retried."
+        ) from None
     except asyncio.CancelledError:
         process.kill()  # shutdown: never leave a parser running unsupervised
         await asyncio.shield(process.wait())  # reap it (no zombie)
         raise
 
+    status, chunks = _read_result(out_path)
+    if status is not None:
+        if "error" in status:
+            error_class = _ERRORS.get(status["error"]["type"], ParsingError)
+            raise error_class(status["error"]["message"])
+        return chunks
+
+    # No result: the child died before writing it.
+    code = process.returncode
+    tail = _tail(stderr_path)
+    if code == _signal_exit("SIGXCPU"):  # CPU time spent on this document
+        raise ParsingError(TIME_LIMIT_REASON)
+    if "MemoryError" in tail:
+        raise ParsingError(MEMORY_LIMIT_REASON)
+    if code == _signal_exit("SIGXFSZ"):
+        raise ParsingError(OUTPUT_LIMIT_REASON)
+    logger.warning(
+        "document_parser_exited_without_result", returncode=code, stderr_tail=tail[-500:]
+    )
+    raise TransientProcessingError(
+        f"The document parser stopped unexpectedly (exit {code}); it will be retried."
+    )
+
+
+def _child_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
+    env.update(
+        PYTHONPATH=str(_BACKEND_ROOT),
+        PYTHONDONTWRITEBYTECODE="1",
+        MALLOC_ARENA_MAX="2",  # one parsing thread; don't reserve arenas
+        # Settings requires these; the child never connects or signs anything.
+        JWT_SECRET="isolated-document-parser-has-no-secrets-0000",
+        DATABASE_URL="postgresql+asyncpg://parser@localhost.invalid/none",
+        OTEL_ENABLED="false",
+        RETRIVA_PARSER_MEMORY_MB=str(settings.DOCUMENT_PARSE_MEMORY_LIMIT_MB),
+        RETRIVA_PARSER_CPU_SECONDS=str(settings.DOCUMENT_PARSE_TIMEOUT_SECONDS),
+        RETRIVA_PARSER_PARENT_PID=str(os.getpid()),
+    )
+    return env
+
+
+def _read_result(out_path: str) -> tuple[dict | None, list[Chunk]]:
+    """(status, chunks), or (None, []) if no complete result was written."""
     try:
         with open(out_path, encoding="utf-8") as f:
-            result = json.load(f)
-    except (OSError, ValueError):
-        result = None
-    if result is None:
-        # No result written: the child died (MemoryError while writing, killed by
-        # the kernel, crashed). Treat as a resource overrun, never retried.
-        tail = (stderr or b"")[-300:].decode("utf-8", "replace")
-        if process.returncode == _SIGKILLED or "MemoryError" in tail:
-            raise ParsingError(MEMORY_LIMIT_REASON)  # kernel OOM kill, or rlimit hit
-        raise ParsingError(f"Could not process this document (exit {process.returncode}).")
-    if "error" in result:
-        error_class = _ERRORS.get(result["error"]["type"], ParsingError)
-        raise error_class(result["error"]["message"])
-    return [Chunk(**c) for c in result["chunks"]]
+            status = json.loads(f.readline())
+            chunks = [Chunk(**json.loads(line)) for line in f] if "ok" in status else []
+            if "ok" in status and len(chunks) != status.get("chunks"):
+                return None, []  # truncated
+            return status, chunks
+    except (OSError, ValueError, TypeError):
+        return None, []
+
+
+def _tail(path: str) -> str:
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - _STDERR_TAIL_BYTES))
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
 
 
 def _parse_and_chunk(path: str, mime_type: str) -> list[Chunk]:
@@ -142,59 +237,105 @@ def _parse_and_chunk(path: str, mime_type: str) -> list[Chunk]:
     return chunks
 
 
-def _limit_own_memory() -> None:
-    if sys.platform == "win32":  # local development on Windows: no rlimit support
+# ---------------------------------------------------------------- child side
+
+
+class _SetupError(Exception):
+    pass
+
+
+def _apply_child_limits() -> None:
+    """Called first in the child. Raises _SetupError if a limit can't be set:
+    parsing without the limits would put the API's memory at risk."""
+    if sys.platform == "win32":  # local development on Windows: no rlimits
         return
     import resource
 
-    limit_mb = int(os.environ.get("DOCUMENT_PARSE_MEMORY_LIMIT_MB", "224"))
-    limit = limit_mb * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
+    try:
+        memory = int(os.environ.get("RETRIVA_PARSER_MEMORY_MB", "224")) * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_DATA, (memory, memory))
+        cpu = int(os.environ.get("RETRIVA_PARSER_CPU_SECONDS", "120"))
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 5))  # SIGXCPU, then SIGKILL
+        resource.setrlimit(resource.RLIMIT_FSIZE, (_OUTPUT_LIMIT_BYTES, _OUTPUT_LIMIT_BYTES))
+    except (ValueError, OSError) as exc:
+        raise _SetupError(f"setrlimit failed: {exc}") from exc
+
+    if sys.platform.startswith("linux"):
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        pr_set_pdeathsig = 1
+        if libc.prctl(pr_set_pdeathsig, int(signal.SIGKILL), 0, 0, 0) != 0:
+            raise _SetupError("prctl(PR_SET_PDEATHSIG) failed")
+    expected_parent = os.environ.get("RETRIVA_PARSER_PARENT_PID")
+    if expected_parent and os.getppid() != int(expected_parent):
+        os._exit(0)  # the parent died before the death signal was armed
 
 
-def _near_memory_limit() -> bool:
-    """True if this process's peak RSS reached 90% of its memory limit (an
-    exhausted limit's peak RSS is measured at about the limit + 17 MiB).
-
-    VmHWM, not getrusage's ru_maxrss: ru_maxrss survives exec, so it would
-    report the (large) forking API process's peak as the child's."""
+def _is_memory_failure(exc: BaseException) -> bool:
+    """A failed allocation, however the library reported it: MemoryError anywhere
+    in the cause chain (parsers wrap errors), C libraries' own wording (zlib:
+    "Unable to allocate output buffer"; libxml2: "unknown error"), or this
+    process's peak RSS at the limit (an exhausted limit peaks at ~limit + 17 MiB)."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, MemoryError) or "allocate" in str(current).lower():
+            return True
+        current = current.__cause__ or current.__context__
     try:
         with open("/proc/self/status", encoding="ascii") as status:
             line = next(x for x in status if x.startswith("VmHWM:"))
     except (OSError, StopIteration):
         return False
-    limit_mb = int(os.environ.get("DOCUMENT_PARSE_MEMORY_LIMIT_MB", "224"))
-    return int(line.split()[1]) * 1024 >= 0.9 * limit_mb * 1024 * 1024
+    # VmHWM, not getrusage's ru_maxrss: ru_maxrss survives exec, so it would
+    # report the (large) forking API process's peak as the child's.
+    limit = int(os.environ.get("RETRIVA_PARSER_MEMORY_MB", "224")) * 1024 * 1024
+    return int(line.split()[1]) * 1024 >= 0.9 * limit
+
+
+def _status_for(exc: BaseException) -> dict:
+    if isinstance(exc, _SetupError):
+        message = "The document parser could not start safely; it will be retried."
+        return {"error": {"type": "TransientProcessingError", "message": message}}
+    if _is_memory_failure(exc):
+        return {"error": {"type": "ParsingError", "message": MEMORY_LIMIT_REASON}}
+    if isinstance(exc, PermanentProcessingError):
+        return {"error": {"type": type(exc).__name__, "message": str(exc)}}
+    # A parser bug: permanent, but never leak internals.
+    message = f"Could not parse this document ({type(exc).__name__})."
+    return {"error": {"type": "ParsingError", "message": message}}
 
 
 def _child_main(argv: list[str]) -> int:
-    _limit_own_memory()  # first, before anything large is allocated
-    in_path, mime_type, out_path, limits_path = argv
-    with open(limits_path, encoding="utf-8") as f:
-        for name, value in json.load(f).items():
-            setattr(settings, name, value)
     try:
-        chunks = _parse_and_chunk(in_path, mime_type)
-        payload: dict = {"chunks": [asdict(c) for c in chunks]}
-    except MemoryError:
-        payload = {"error": {"type": "ParsingError", "message": MEMORY_LIMIT_REASON}}
-    except Exception as exc:
-        if _near_memory_limit():
-            # C libraries report a failed allocation in their own words (libxml2:
-            # "unknown error"; zlib: "Unable to allocate output buffer"), which
-            # parsers then wrap as a parse error. Report what actually happened.
-            payload = {"error": {"type": "ParsingError", "message": MEMORY_LIMIT_REASON}}
-        elif isinstance(exc, PermanentProcessingError):
-            payload = {"error": {"type": type(exc).__name__, "message": str(exc)}}
-        else:  # parser bug: permanent, but never leak internals
-            payload = {
-                "error": {
-                    "type": "ParsingError",
-                    "message": f"Could not parse this document ({type(exc).__name__}).",
-                }
-            }
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f)
+        _apply_child_limits()  # first, before anything large is allocated
+    except _SetupError as exc:
+        print(f"document parser setup failed: {exc}", file=sys.stderr)
+        status: dict = _status_for(exc)
+        chunks: list[Chunk] = []
+    else:
+        import logging
+        import warnings
+
+        logging.disable(logging.WARNING)  # pypdf warnings can flood (crafted CMaps)
+        warnings.simplefilter("ignore")
+        in_path, mime_type, _, limits_path = argv
+        with open(limits_path, encoding="utf-8") as f:
+            for name, value in json.load(f).items():
+                setattr(settings, name, value)
+        try:
+            chunks = _parse_and_chunk(in_path, mime_type)
+            status = {"ok": True, "chunks": len(chunks)}
+        except Exception as exc:  # MemoryError included
+            chunks = []
+            status = _status_for(exc)
+
+    with open(argv[2], "w", encoding="utf-8") as out:
+        out.write(json.dumps(status) + "\n")
+        for chunk in chunks:
+            out.write(json.dumps(asdict(chunk), ensure_ascii=False) + "\n")
     return 0
 
 

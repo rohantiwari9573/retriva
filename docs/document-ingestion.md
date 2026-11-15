@@ -70,26 +70,50 @@ adversarial review found files that defeated them: a DOCX whose content sits in
 one table or one giant paragraph (the streaming parser can only free it at the
 end), an oversized `_rels/.rels`, a PDF of 500 pages each just under the stream
 cap, and millions of tiny elements. Parsing and chunking therefore run in a child
-process (`app/ingestion/isolated.py`, `python -m app.ingestion.isolated`). The
-child:
-- caps its own data segment with `RLIMIT_DATA` as its first action, at
-  `DOCUMENT_PARSE_MEMORY_LIMIT_MB` (default 224). Measured peak RSS is about the
-  limit plus 17 MiB;
-- is killed after `DOCUMENT_PARSE_TIMEOUT_SECONDS` (default 120);
-- hands back only the chunks, through a file in the document's private work dir.
+process (`app/ingestion/isolated.py`, `python -m app.ingestion.isolated`). As its
+first actions the child:
+- caps its data segment with `RLIMIT_DATA` at `DOCUMENT_PARSE_MEMORY_LIMIT_MB`
+  (default 224; measured peak RSS is about the limit plus 17 MiB);
+- caps its CPU time with `RLIMIT_CPU` at `DOCUMENT_PARSE_TIMEOUT_SECONDS`
+  (default 120). This is CPU time, not wall time, so a busy or fractional-CPU
+  instance doesn't fail a valid document;
+- caps any file it writes at 64 MiB (`RLIMIT_FSIZE`);
+- arms `PR_SET_PDEATHSIG`, so the kernel kills it if the API or worker dies (it
+  never runs unsupervised), and exits if its parent is already gone;
+- turns off warning logs (pypdf can log tens of MB per page for crafted CMaps).
 
-An overrun is a `MemoryError` inside the child, or a kill. Either way the
-document fails permanently with a clear reason ("too large or complex to process
-within the memory limit" / "took too long"), because it would fail the same way
-on every retry. The API or worker process never sees the overrun. A cancelled
-parse (shutdown) kills and reaps the child. The runtime-adjustable limits
-(text length, pages, DOCX size, PDF stream size, chunk size and overlap,
-`MAX_CHUNKS_PER_DOCUMENT`) are passed to the child, and the chunker stops as soon
-as a document passes `MAX_CHUNKS_PER_DOCUMENT`. Separately from isolation, the
-DOCX package's relationships part is capped at 1 MiB.
-`DOCUMENT_PARSE_ISOLATION=false` parses in-process instead (development only;
-it removes the memory bound). The limit is enforced on Linux; Windows has no
-`RLIMIT_DATA`, so there the child runs without the memory cap.
+The child's stderr goes to a file in the document's private work dir, and only
+its last 2 KB are read. It is never a pipe the parent buffers: a 58 KB PDF's
+warnings once grew the parent to an OOM kill. The chunks come back as JSON lines
+in the same dir. The child gets a minimal environment with no credentials, and
+runs in the work dir, so it reads no `.env`. The runtime-adjustable limits (text
+length, pages, DOCX size, PDF stream size, chunk size and overlap,
+`MAX_CHUNKS_PER_DOCUMENT`) are passed to it in a file, and the chunker stops as
+soon as a document passes `MAX_CHUNKS_PER_DOCUMENT`.
+
+How an outcome is classified:
+
+| Outcome | Classification |
+|---|---|
+| Parse error, too much text, memory limit reached, CPU limit reached, output too large | **Permanent:** the document itself is the cause, and it fails with a clear reason |
+| Killed from outside, e.g. by the kernel when the whole instance ran short of memory | **Transient:** the attempt limit bounds the retries |
+| Wall-clock backstop, `DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS` (default 900) | **Transient** |
+| Crash, disk full, limits that could not be set | **Transient** |
+
+A memory overrun is recognised however the C library reports it: a
+`MemoryError` anywhere in the cause chain, zlib's "Unable to allocate", or the
+child's peak RSS at the limit. A cancelled parse (shutdown) kills and reaps the
+child.
+
+Separately from isolation:
+- the DOCX package's relationships part is capped at 1 MiB;
+- a sentence longer than the chunk size is window-split rather than kept whole,
+  so no chunk is far above the target size.
+
+`DOCUMENT_PARSE_ISOLATION=false` parses in-process instead. That is for
+development only, because it removes the bounds. The limits are enforced on
+Linux. Windows has no rlimits, and macOS doesn't enforce `RLIMIT_DATA`, so the
+child runs uncapped there.
 
 **Per process:** inline mode runs at most `DOCUMENT_PROCESSING_CONCURRENCY`
 documents at once (default 1) on a dedicated executor; others wait in memory,
@@ -217,9 +241,9 @@ fixed-N-character splitting:
 1. Each parsed element's text is normalized, then split into paragraphs
    (`\n\n`-separated).
 2. A paragraph larger than the target chunk size is itself split - first on
-   sentence boundaries (keeps sentences intact); if that produces no
-   boundaries (one giant run-on sentence), on a fixed character window
-   instead.
+   sentence boundaries (keeps sentences intact); a sentence that is itself
+   larger than the target (or a paragraph with no boundaries at all) is split
+   on a fixed character window instead.
 3. Paragraphs are packed greedily into chunks up to `CHUNK_SIZE_TOKENS`.
    A chunk's `page_number`/`section` come from its **first** paragraph.
 4. Overlap is carried at paragraph granularity: after closing a chunk, the
@@ -541,6 +565,10 @@ something this phase needed.
   1.3 s (median of 10, Docker Desktop with a bind-mounted source tree), mostly
   importing the app's settings and parsers. It is slower on a fractional-CPU
   instance.
+- A document killed from outside (for example by the kernel when the whole
+  instance is out of memory) is retried, up to the attempt limit, at a cost of
+  one attempt each time. The child can't tell that case apart from its own
+  overrun, because the kill leaves no report.
 - Embeddings are still requested in groups and held for the whole document
   (float32, ~3 KB per chunk) until the final transaction, so memory per document
   grows with its chunk count, which `MAX_CHUNKS_PER_DOCUMENT` bounds.

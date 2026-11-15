@@ -159,3 +159,18 @@ def test_stale_ingestion_workdirs_are_removed_but_active_and_young_ones_kept(tmp
     assert pipeline.cleanup_stale_workdirs() == 1
     assert not stale.exists()
     assert young.exists() and active.exists() and unrelated.exists()
+
+
+def test_a_sentence_larger_than_the_chunk_size_is_window_split():
+    """Reviewer M3: a multi-sentence paragraph whose one sentence was 20 MB became
+    one 20 MB chunk (and a ~60 MB JSON line, embedding request and row)."""
+    from app.ingestion.parsers.base import ParsedDocument, ParsedElement
+
+    text = "Start. " + "x" * 50_000 + " end."
+    chunks = chunk_document(
+        ParsedDocument(elements=[ParsedElement(text=text)]),
+        chunk_size_tokens=500,
+        chunk_overlap_tokens=50,
+    )
+    assert max(c.char_count for c in chunks) <= 500 * 4 + 10
+    assert "".join(c.content for c in chunks).replace("\n\n", "").count("x") >= 50_000

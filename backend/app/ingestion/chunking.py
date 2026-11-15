@@ -86,38 +86,52 @@ def _paragraphs(document: ParsedDocument) -> list[_Unit]:
     return units
 
 
+def _windows(text: str, unit: _Unit, max_tokens: int) -> list[_Unit]:
+    window_chars = max_tokens * _CHARS_PER_TOKEN
+    return [
+        _Unit(
+            text=text[i : i + window_chars],
+            page_number=unit.page_number,
+            section=unit.section,
+            token_count=estimate_token_count(text[i : i + window_chars]),
+        )
+        for i in range(0, len(text), window_chars)
+    ]
+
+
 def _split_oversized(unit: _Unit, max_tokens: int) -> list[_Unit]:
     """A single paragraph larger than the whole target chunk size - split on
-    sentence boundaries first (keeps sentences intact); if it's one giant
-    sentence with no punctuation, fall back to a fixed character window
-    sized to approximately max_tokens."""
+    sentence boundaries first (keeps sentences intact); a sentence that is itself
+    larger than the target (or a paragraph with no punctuation at all) falls back
+    to a fixed character window sized to approximately max_tokens, so no chunk is
+    ever far above the target size."""
     sentences = [s for s in _SENTENCE_SPLIT_RE.split(unit.text) if s]
     if len(sentences) <= 1:
-        window_chars = max_tokens * _CHARS_PER_TOKEN
-        return [
-            _Unit(
-                text=unit.text[i : i + window_chars],
-                page_number=unit.page_number,
-                section=unit.section,
-                token_count=estimate_token_count(unit.text[i : i + window_chars]),
-            )
-            for i in range(0, len(unit.text), window_chars)
-        ]
+        return _windows(unit.text, unit, max_tokens)
 
     result: list[_Unit] = []
     current: list[str] = []
     current_tokens = 0
-    for sentence in sentences:
-        tokens = estimate_token_count(sentence)
-        if current and current_tokens + tokens > max_tokens:
+
+    def close() -> None:
+        nonlocal current, current_tokens
+        if current:
             text = " ".join(current)
             result.append(_Unit(text, unit.page_number, unit.section, current_tokens))
             current, current_tokens = [], 0
+
+    for sentence in sentences:
+        tokens = estimate_token_count(sentence)
+        if tokens > max_tokens:
+            # Previously kept whole: one 20 MB sentence became one 20 MB chunk.
+            close()
+            result.extend(_windows(sentence, unit, max_tokens))
+            continue
+        if current and current_tokens + tokens > max_tokens:
+            close()
         current.append(sentence)
         current_tokens += tokens
-    if current:
-        text = " ".join(current)
-        result.append(_Unit(text, unit.page_number, unit.section, current_tokens))
+    close()
     return result
 
 

@@ -141,7 +141,11 @@ class Settings(BaseSettings):
     # process's memory is never at risk from parser behaviour.
     DOCUMENT_PARSE_ISOLATION: bool = True
     DOCUMENT_PARSE_MEMORY_LIMIT_MB: int = Field(default=224, ge=64)
+    # CPU seconds a document may spend parsing (RLIMIT_CPU in the child): its
+    # own cost, independent of how busy the instance is. Exceeding it is permanent.
     DOCUMENT_PARSE_TIMEOUT_SECONDS: int = Field(default=120, ge=5)
+    # Wall-clock backstop (a starved or blocked child); exceeding it is transient.
+    DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS: int = Field(default=900, ge=10)
     RETRIEVAL_TOP_K: int = 8
     RETRIEVAL_CANDIDATE_POOL: int = 30
     MAX_CONTEXT_TOKENS: int = 3000
