@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.ingestion import lease
+from app.ingestion.pipeline import cleanup_stale_workdirs
 from app.ingestion.runner import dispatch, get_inline_runner
 
 logger = get_logger(__name__)
@@ -28,6 +29,7 @@ async def sweep_once(session_factory: async_sessionmaker[AsyncSession]) -> lease
         if settings.DOCUMENT_PROCESSING_MODE == "inline"
         else frozenset()
     )
+    await asyncio.to_thread(cleanup_stale_workdirs)
     result = await lease.sweep(session_factory, exclude=exclude)
     for document_id in result.requeued:
         try:

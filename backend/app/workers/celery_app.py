@@ -47,8 +47,10 @@ def _init_worker_observability(**kwargs) -> None:
     from prometheus_client import start_http_server
 
     from app.core.telemetry import init_tracing, instrument_celery, instrument_httpx
+    from app.ingestion.pipeline import cleanup_stale_workdirs
 
     configure_logging()
+    cleanup_stale_workdirs()  # left by a worker killed mid-attempt
     init_tracing()
     instrument_celery()
     instrument_httpx()

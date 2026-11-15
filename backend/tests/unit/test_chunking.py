@@ -134,3 +134,28 @@ def test_every_chunk_adds_new_text_and_chunking_always_terminates():
         # Bounded output: overlap can't make the chunk count explode.
         total_tokens = sum(estimate_token_count(p) for p in paragraphs)
         assert len(chunks) <= 2 * (total_tokens // 450 + len(paragraphs)) + 1
+
+
+def test_stale_ingestion_workdirs_are_removed_but_active_and_young_ones_kept(tmp_path, monkeypatch):
+    import os
+    import tempfile
+    import time
+
+    from app.ingestion import pipeline
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    stale = tmp_path / f"{pipeline.WORKDIR_PREFIX}stale"
+    young = tmp_path / f"{pipeline.WORKDIR_PREFIX}young"
+    active = tmp_path / f"{pipeline.WORKDIR_PREFIX}active"
+    unrelated = tmp_path / "something-else"
+    for d in (stale, young, active, unrelated):
+        d.mkdir()
+        (d / "source").write_bytes(b"x")
+    old = time.time() - 2 * pipeline.STALE_WORKDIR_SECONDS
+    for d in (stale, active, unrelated):
+        os.utime(d, (old, old))
+    monkeypatch.setattr(pipeline, "_active_workdirs", {str(active)})
+
+    assert pipeline.cleanup_stale_workdirs() == 1
+    assert not stale.exists()
+    assert young.exists() and active.exists() and unrelated.exists()

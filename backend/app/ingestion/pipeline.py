@@ -68,6 +68,42 @@ from app.storage.base import StorageProvider
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
 
+WORKDIR_PREFIX = "retriva-ingest-"
+# A leftover work directory older than this is never in use: attempts take seconds
+# to minutes (provider and storage calls all have timeouts).
+STALE_WORKDIR_SECONDS = 3600
+_active_workdirs: set[str] = set()
+
+
+def cleanup_stale_workdirs(max_age_seconds: float = STALE_WORKDIR_SECONDS) -> int:
+    """Removes ingestion work directories left by killed attempts. Skips any in use
+    by this process and any younger than max_age_seconds (another process's)."""
+    import shutil
+
+    removed = 0
+    root = tempfile.gettempdir()
+    now = time.time()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.startswith(WORKDIR_PREFIX):
+            continue
+        path = os.path.join(root, name)
+        if path in _active_workdirs:
+            continue
+        try:
+            if now - os.path.getmtime(path) < max_age_seconds:
+                continue
+            shutil.rmtree(path)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        logger.info("document_processing_workdirs_removed", count=removed)
+    return removed
+
 
 class PipelineOutcome(StrEnum):
     COMPLETED = "completed"
@@ -178,24 +214,36 @@ def _superseded(claim: "lease.Claim", where: str) -> PipelineOutcome:
 
 async def _download_parse_and_chunk(claim: "lease.Claim", storage: StorageProvider) -> list[Chunk]:
     # A private directory (0700) holds the downloaded original; it is removed when
-    # this block exits, whatever happens inside it.
-    with tempfile.TemporaryDirectory(prefix="retriva-ingest-") as workdir:
-        path = os.path.join(workdir, "source")
+    # this block exits, whatever happens inside it. A process killed mid-way can't
+    # run that cleanup, so cleanup_stale_workdirs() (startup and every sweep)
+    # removes leftovers that no live attempt in this process is using.
+    with tempfile.TemporaryDirectory(prefix=WORKDIR_PREFIX) as workdir:
+        _active_workdirs.add(workdir)
         try:
-            with open(path, "wb") as target:
-                await storage.download_to_file(claim.storage_key, target)
-        except StorageObjectNotFoundError as exc:
-            raise PermanentProcessingError(str(exc)) from exc
-        except StorageError as exc:
-            raise TransientProcessingError(str(exc)) from exc
+            return await _parse_and_chunk_in(workdir, claim, storage)
+        finally:
+            _active_workdirs.discard(workdir)
 
-        with tracer.start_as_current_span("document.parse"):
-            parse_start = time.perf_counter()
-            parser = get_parser_for_mime_type(claim.mime_type)
-            parsed = parser.parse_file(path)
-            document_parse_duration_seconds.labels(document_type=claim.mime_type).observe(
-                time.perf_counter() - parse_start
-            )
+
+async def _parse_and_chunk_in(
+    workdir: str, claim: "lease.Claim", storage: StorageProvider
+) -> list[Chunk]:
+    path = os.path.join(workdir, "source")
+    try:
+        with open(path, "wb") as target:
+            await storage.download_to_file(claim.storage_key, target)
+    except StorageObjectNotFoundError as exc:
+        raise PermanentProcessingError(str(exc)) from exc
+    except StorageError as exc:
+        raise TransientProcessingError(str(exc)) from exc
+
+    with tracer.start_as_current_span("document.parse"):
+        parse_start = time.perf_counter()
+        parser = get_parser_for_mime_type(claim.mime_type)
+        parsed = parser.parse_file(path)
+        document_parse_duration_seconds.labels(document_type=claim.mime_type).observe(
+            time.perf_counter() - parse_start
+        )
 
     if not parsed.elements:
         raise EmptyDocumentError("Document contains no extractable text.")
