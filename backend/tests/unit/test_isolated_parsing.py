@@ -414,3 +414,38 @@ async def test_an_allocation_failure_inside_a_c_parser_reports_the_memory_limit(
     with pytest.raises(ParsingError) as info:
         await isolated.parse_and_chunk(path, DOCX, str(tmp_path))
     assert str(info.value) == isolated.MEMORY_LIMIT_REASON
+
+
+@linux_only
+async def test_a_wall_timeout_after_most_of_the_cpu_budget_fails_permanently(tmp_path, monkeypatch):
+    """Review M-A: on a fractional-CPU instance the wall-clock backstop fires
+    before the CPU limit. A child that had used most of its CPU budget is the
+    document's cost, not starvation: fail it rather than hold the slot again."""
+    monkeypatch.setattr(settings, "DOCUMENT_PARSE_TIMEOUT_SECONDS", 1)  # threshold 0.5 CPU-s
+    monkeypatch.setattr(settings, "DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS", 2)
+    _fake_child(monkeypatch, "while True: pass")  # no rlimit: only the wall clock stops it
+    path = _write(tmp_path, "a.txt", b"x")
+    with pytest.raises(ParsingError) as info:
+        await isolated.parse_and_chunk(path, "text/plain", str(tmp_path))
+    assert str(info.value) == isolated.TIME_LIMIT_REASON
+
+
+@linux_only
+async def test_output_over_the_file_size_limit_fails_permanently(tmp_path, monkeypatch):
+    """Review L-a: Python ignores SIGXFSZ, so RLIMIT_FSIZE surfaces as EFBIG."""
+    real = asyncio.create_subprocess_exec
+    code = (
+        "import sys\n"
+        "from app.ingestion import isolated\n"
+        "isolated._OUTPUT_LIMIT_BYTES = 4096\n"
+        "raise SystemExit(isolated._child_main(sys.argv[1:]))\n"
+    )
+
+    async def spawn(*args, **kwargs):  # the real child, with a tiny output limit
+        return await real(sys.executable, "-c", code, *args[3:], **kwargs)
+
+    monkeypatch.setattr(isolated.asyncio, "create_subprocess_exec", spawn)
+    path = _write(tmp_path, "a.txt", b"A sentence of some length here.\n\n" * 2000)
+    with pytest.raises(ParsingError) as info:
+        await isolated.parse_and_chunk(path, "text/plain", str(tmp_path))
+    assert str(info.value) == isolated.OUTPUT_LIMIT_REASON

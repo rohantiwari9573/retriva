@@ -36,6 +36,7 @@ on success, by one chunk per line.
 """
 
 import asyncio
+import errno
 import json
 import os
 import signal
@@ -138,10 +139,16 @@ async def parse_and_chunk(path: str, mime_type: str, workdir: str) -> list[Chunk
     try:
         await asyncio.wait_for(process.wait(), timeout=settings.DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS)
     except TimeoutError:
+        cpu_used = _cpu_seconds(process.pid)  # read before the kill reaps it
         process.kill()
         await process.wait()
-        # CPU time is limited in the child; a wall-clock stall means the instance
-        # was starved (or the child blocked), not that the document is bad.
+        # On a fractional-CPU instance the wall-clock backstop can fire before
+        # the CPU limit. If the child had used most of its CPU budget anyway, the
+        # document is the cost: fail it (retrying would hold the processing slot
+        # for another full timeout each time). Otherwise the instance was
+        # starved or the child blocked: retry.
+        if cpu_used is not None and cpu_used >= 0.5 * settings.DOCUMENT_PARSE_TIMEOUT_SECONDS:
+            raise ParsingError(TIME_LIMIT_REASON) from None
         raise TransientProcessingError(
             "Parsing did not finish in time on a busy instance; it will be retried."
         ) from None
@@ -164,8 +171,6 @@ async def parse_and_chunk(path: str, mime_type: str, workdir: str) -> list[Chunk
         raise ParsingError(TIME_LIMIT_REASON)
     if "MemoryError" in tail:
         raise ParsingError(MEMORY_LIMIT_REASON)
-    if code == _signal_exit("SIGXFSZ"):
-        raise ParsingError(OUTPUT_LIMIT_REASON)
     logger.warning(
         "document_parser_exited_without_result", returncode=code, stderr_tail=tail[-500:]
     )
@@ -174,11 +179,22 @@ async def parse_and_chunk(path: str, mime_type: str, workdir: str) -> list[Chunk
     )
 
 
+def _cpu_seconds(pid: int) -> float | None:
+    """User + system CPU time of a running process (Linux /proc), else None."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii") as stat:
+            fields = stat.read().rsplit(")", 1)[1].split()
+        return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, AttributeError):
+        return None
+
+
 def _child_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
     env.update(
         PYTHONPATH=str(_BACKEND_ROOT),
         PYTHONDONTWRITEBYTECODE="1",
+        PYTHONSAFEPATH="1",  # never import from the work dir (cwd)
         MALLOC_ARENA_MAX="2",  # one parsing thread; don't reserve arenas
         # Settings requires these; the child never connects or signs anything.
         JWT_SECRET="isolated-document-parser-has-no-secrets-0000",
@@ -256,11 +272,17 @@ def _apply_child_limits() -> None:
         resource.setrlimit(resource.RLIMIT_DATA, (memory, memory))
         cpu = int(os.environ.get("RETRIVA_PARSER_CPU_SECONDS", "120"))
         resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 5))  # SIGXCPU, then SIGKILL
+        # Python ignores SIGXFSZ, so an oversized write raises OSError(EFBIG).
         resource.setrlimit(resource.RLIMIT_FSIZE, (_OUTPUT_LIMIT_BYTES, _OUTPUT_LIMIT_BYTES))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))  # SIGXCPU would dump core
     except (ValueError, OSError) as exc:
         raise _SetupError(f"setrlimit failed: {exc}") from exc
 
     if sys.platform.startswith("linux"):
+        # PDEATHSIG follows the *thread* that forked us: the attempt's event-loop
+        # thread (the InlineRunner executor thread, or Celery's main thread),
+        # which is blocked awaiting this child, so it can't exit first. Don't
+        # spawn the child from a short-lived thread (e.g. asyncio.to_thread).
         import ctypes
 
         libc = ctypes.CDLL(None, use_errno=True)
@@ -332,11 +354,21 @@ def _child_main(argv: list[str]) -> int:
             chunks = []
             status = _status_for(exc)
 
-    with open(argv[2], "w", encoding="utf-8") as out:
+    try:
+        _write_result(argv[2], status, chunks)
+    except OSError as exc:
+        if exc.errno != errno.EFBIG:
+            raise  # e.g. disk full: no result -> transient in the parent
+        error = {"error": {"type": "ParsingError", "message": OUTPUT_LIMIT_REASON}}
+        _write_result(argv[2], error, [])
+    return 0
+
+
+def _write_result(path: str, status: dict, chunks: list[Chunk]) -> None:
+    with open(path, "w", encoding="utf-8") as out:
         out.write(json.dumps(status) + "\n")
         for chunk in chunks:
             out.write(json.dumps(asdict(chunk), ensure_ascii=False) + "\n")
-    return 0
 
 
 if __name__ == "__main__":

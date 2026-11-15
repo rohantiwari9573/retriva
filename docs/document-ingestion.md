@@ -124,20 +124,22 @@ own `--concurrency` bounds it.
 
 | Scenario | Before | After (with parser isolation) |
 |---|---|---|
-| Five 25 MiB PDFs uploaded at once | 461 MiB | 276 MiB, all READY |
-| Five large failed PDFs retried at once | OOM-killed | 272 MiB, all READY |
-| Five 3.8 MB text-heavy PDFs (1,950 chunks each) | OOM-killed | 222 MiB, all READY in 57 s |
-| One text-heavy PDF | OOM-killed (chunker loop) | 171 MiB, READY |
-| 25 MB Markdown of one-character lines | 420 MiB | 236 MiB, rejected early |
-| 390 KB DOCX holding 95 MB of XML | 433 MiB | 171 MiB, rejected early |
+| Five 25 MiB PDFs uploaded at once | 461 MiB | 273 MiB, all READY |
+| Five large failed PDFs retried at once | OOM-killed | 278 MiB, all READY |
+| Five 3.8 MB text-heavy PDFs (1,950 chunks each) | OOM-killed | 218 MiB, all READY in 68 s |
+| One text-heavy PDF | OOM-killed (chunker loop) | 173 MiB, READY |
+| 25 MB Markdown of one-character lines | 420 MiB | 237 MiB, rejected early |
+| 390 KB DOCX holding 95 MB of XML | 433 MiB | 175 MiB, rejected early |
 | 0.8 MB PDF decompression bomb | 263 MiB | 171 MiB, rejected |
-| Review files: 95 MB of XML in one DOCX table / one paragraph / 2.6M tiny paragraphs | unbounded at `573cf0c` (review) | 334-336 MiB, FAILED (memory limit) |
-| Review files: DOCX with a 90 MB `.rels`; 500-page PDF, each page just under the stream cap | unbounded at `573cf0c` (review) | 171 / 338 MiB, FAILED with reason |
-| That PDF parsing while five 25 MiB PDFs upload and process | - | 363 MiB, PDF FAILED, five READY |
+| Review files: 95 MB of XML in one DOCX table / one paragraph / 2.6M tiny paragraphs | unbounded at `573cf0c` | 334-343 MiB, FAILED (memory limit) |
+| Review files: DOCX with a 90 MB `.rels`; 500-page PDF, each page just under the stream cap | unbounded at `573cf0c` | 172 / 339 MiB, FAILED with reason |
+| Review file: 58 KB PDF whose CMaps log ~26 MB of warnings per page | parent OOM-killed at `58e083a` | 218 MiB, FAILED (CPU limit) after 123 s |
+| One 20 MB sentence (single giant chunk before) | +117 MiB in the parent at `58e083a` | 223 MiB, FAILED (chunk limit) |
+| The 500-page PDF parsing while five 25 MiB PDFs upload and process | - | 364 MiB, PDF FAILED, five READY |
 
 The "After" column includes the parse child, which runs in the same container.
-Its limit (224 MiB) is what sets the ~335 MiB worst case, leaving about 175 MiB
-of headroom on 512 MB.
+Its limit (224 MiB) is what sets the ~340 MiB single-document worst case; the
+worst combination measured (364 MiB) leaves about 150 MiB of headroom on 512 MB.
 
 With `DOCUMENT_PROCESSING_CONCURRENCY=2` the same scenarios peaked at
 223-292 MB and five text-heavy PDFs finished in 40 s instead of 54 s. 1 is the
