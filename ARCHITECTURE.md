@@ -65,9 +65,11 @@ flowchart LR
 Website traffic reaches the API from Vercel's addresses, so the TCP peer is the same
 for every visitor. The proxy runs only on `/api/v1/auth/*`, the only routes limited
 per IP; uploads and all other API calls skip it (on Vercel the proxy is a function
-whose request body is capped at ~4.5 MB). Rewrites are case-sensitive
-(`experimental.caseSensitiveRoutes`), so a variant such as `/API/v1/auth/login` is not
-forwarded to the API at all and can't reach login without the proxy.
+whose request body is capped at ~4.5 MB). Vercel rewrites `/API/...` (any casing of
+the first segment) to the API's lowercase `/api/...`, so the proxy matcher accepts any
+casing of that segment and every rewritten auth request is signed; the rest of the path
+keeps its case and the API's routes are case-sensitive, so other variants get a 404.
+Self-hosted, `experimental.caseSensitiveRoutes` also stops `/API/...` being rewritten.
 `resolve_client_ip` uses the first source that validates:
 
 1. **Signed assertion** from our proxy, when `EDGE_PROXY_SHARED_SECRET` is set. The

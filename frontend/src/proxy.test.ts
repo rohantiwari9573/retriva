@@ -42,6 +42,24 @@ describe("proxy matcher: which /api routes run the proxy function", () => {
     },
   );
 
+  // Vercel rewrites /API/... (any case of the first segment) to the API's lowercase
+  // /api/... route, so every casing of that segment must still run the proxy.
+  it.each(["/API/v1/auth/login", "/Api/v1/auth/login", "/aPi/v1/auth/register", "/apI/v1/auth/refresh"])(
+    "runs on auth route with another casing of the api segment %s",
+    (url) => {
+      expect(matches(url)).toBe(true);
+    },
+  );
+
+  it.each([
+    `/API/v1/organizations/${ORG}/documents`,
+    "/apix/v1/auth/login",
+    "/xapi/v1/auth/login",
+    "/API/v1/users/me",
+  ])("still does not run on %s", (url) => {
+    expect(matches(url)).toBe(false);
+  });
+
   it.each(["/dashboard", "/dashboard/x", "/documents", "/chat/abc", "/login", "/register", "/settings", "/admin"])(
     "still runs on page route %s (session redirects)",
     (url) => {
@@ -88,5 +106,19 @@ describe("proxy on auth routes", () => {
     );
     expect(forwarded(res, VERIFIED_IP_HEADER)).toBe("198.51.100.7");
     expect(forwarded(res, SIGNATURE_HEADER)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("signs and strips on an upper-case /API/ auth path too", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("EDGE_PROXY_SHARED_SECRET", "s".repeat(40));
+    const res = await proxy(
+      new NextRequest("https://staging.example/API/v1/auth/login", {
+        method: "POST",
+        headers: { "x-vercel-forwarded-for": "198.51.100.8", [VERIFIED_IP_HEADER]: "203.0.113.9", expect: "100-continue" },
+      }),
+    );
+    expect(forwarded(res, VERIFIED_IP_HEADER)).toBe("198.51.100.8");
+    expect(forwarded(res, SIGNATURE_HEADER)).toMatch(/^[0-9a-f]{64}$/);
+    expect(overridden(res)).not.toContain("expect");
   });
 });

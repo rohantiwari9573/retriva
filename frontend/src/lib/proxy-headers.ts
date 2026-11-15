@@ -5,14 +5,10 @@
  * drains every refused body, Expect or not, up to DRAIN_MAX_BYTES / DRAIN_MAX_SECONDS
  * (backend/app/core/request_size.py), so a buffering proxy still gets its 413.
  *
- * What follows describes why auth requests still drop the header.
- *
- * `Expect: 100-continue` is removed. Next has already answered it to the client and
- * buffered the body, then streams that body upstream regardless; forwarded, the
- * header tells the API the sender is still waiting, so the API refuses an oversized
- * upload at once without reading it and closes, and Next, mid-write, hits ECONNRESET
- * and answers 500 instead of passing the 413 on (measured: 26 MiB uploads 500 in
- * 10 of 10 tries with the header, 413 in 10 of 10 without).
+ * Auth requests still drop `Expect: 100-continue`: Next has already answered it to
+ * the client and buffered the body, so the header would only tell the API a sender is
+ * waiting that isn't. Since the API now drains regardless, this is belt and braces
+ * rather than load-bearing (it was, when the API refused Expect bodies unread).
  */
 export function forwardedApiHeaders(incoming: Headers): Headers {
   const headers = new Headers(incoming);

@@ -9,12 +9,12 @@ import nextConfig from "../../next.config";
 const API_MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024 + 1024 * 1024;
 
 describe("next.config caseSensitiveRoutes", () => {
-  it("is on, so only the exact /api/ prefix is rewritten to the API", () => {
-    // The proxy matcher (/api/v1/auth/:path*) is case-sensitive; rewrites are not by
-    // default. Off, /API/v1/auth/login skipped the proxy (no signed client IP, so the
-    // per-IP login limit keyed on Vercel's egress IPs) yet still reached the API's
-    // login route. Next's config-testing helper does not model this flag, so the
-    // runtime behaviour is checked against a real `next start` and on Vercel.
+  it("is on, so a self-hosted Next server rewrites only the exact /api/ prefix", () => {
+    // Measured on a local `next start`: off, /API/v1/auth/login was rewritten to the
+    // API's login; on, it gets Next's 404. Vercel's router ignores this flag for the
+    // rewrite (measured on staging), which is why the proxy matcher itself accepts any
+    // casing of the "api" segment (src/proxy.test.ts). Next's config-testing helper
+    // does not model the flag, so only its value is asserted here.
     expect(nextConfig.experimental?.caseSensitiveRoutes).toBe(true);
   });
 });

@@ -226,8 +226,10 @@ body and not sending it. `RequestBodyLimitMiddleware`
     16 concurrent refused 40 MiB uploads against a real uvicorn server stayed
     within a bounded allocation peak, left no temp files, and the server kept
     answering other requests (`tests/unit/test_request_drain_real_server.py`).
-- **Where the Next.js proxy runs:** only on `/api/v1/auth/*` (the per-IP
-  rate-limited routes, which need the signed client-IP assertion). Uploads and
+- **Where the Next.js proxy runs:** only on `/api/v1/auth/*`, with the `api`
+  segment in any casing (the per-IP rate-limited routes, which need the signed
+  client-IP assertion; Vercel rewrites `/API/...` to the API's `/api/...`, so a
+  lowercase-only matcher let `/API/v1/auth/login` reach login unsigned). Uploads and
   all other API calls go through the plain rewrite to the API, never through
   the proxy function: on Vercel that function caps request bodies at ~4.5 MB,
   which refused every upload of 4.25 MiB or more while uploads were matched.
@@ -239,9 +241,10 @@ body and not sending it. `RequestBodyLimitMiddleware`
     `ROUTER_EXTERNAL_TARGET_CONNECTION_ERROR` before it reaches the API (the
     same request sent directly to the API works). Chunked uploads are not a
     supported way to upload documents through the website.
-  - **Slow oversized uploads over HTTP/1.1** (for example curl) that take longer
-    than the drain bound (~15 s) can end in a connection reset instead of the
-    413. Over HTTP/2 (browsers on Vercel) the 413 was delivered in every test.
+  - **Oversized uploads over HTTP/1.1** (for example curl) that take longer than
+    the drain bound (~15 s), or that declare and send more than 64 MiB (with or
+    without `Expect`), can end in a connection reset instead of the 413. Over
+    HTTP/2 (browsers on Vercel) the 413 was delivered in every test.
 - **What the timeouts cover:** a body that stops arriving, or trickles past its
   deadline, gets a 408 with `connection: close`. Once the body is complete,
   nothing is timed, so streamed chat responses may run and pause freely.
