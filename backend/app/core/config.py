@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     MAX_DOCUMENT_PAGES: int = 500
     MAX_DOCUMENT_TEXT_LENGTH: int = 5_000_000
     MAX_DOCX_UNCOMPRESSED_SIZE_BYTES: int = 100_000_000
+    # Largest decompressed size of any single PDF stream (pypdf's own default is
+    # 75 MB). Text content streams of real documents are far smaller; images are
+    # not decompressed during text extraction.
+    PDF_MAX_DECOMPRESSED_STREAM_BYTES: int = 10_000_000
     RETRIEVAL_TOP_K: int = 8
     RETRIEVAL_CANDIDATE_POOL: int = 30
     MAX_CONTEXT_TOKENS: int = 3000
@@ -145,6 +149,24 @@ class Settings(BaseSettings):
     # runs the same task in a background thread of the API process - for
     # single-container hosts (e.g. Render's free tier) with no worker service.
     DOCUMENT_PROCESSING_MODE: Literal["celery", "inline"] = "celery"
+    # How many documents one process parses/embeds at the same time (inline mode:
+    # the API process; celery mode: each worker process). Each job's memory is
+    # bounded structurally (streamed files, float32 vectors, batched inserts), and
+    # this bounds how many such jobs share the process's memory budget. See
+    # docs/document-ingestion.md "Memory budget" for the measurements behind 1.
+    DOCUMENT_PROCESSING_CONCURRENCY: int = Field(default=1, ge=1, le=8)
+    # A claimed document whose worker stops heartbeating for this long is
+    # considered abandoned (process killed, OOM, restart) and is reclaimed.
+    DOCUMENT_PROCESSING_LEASE_SECONDS: int = Field(default=600, ge=5)
+    # A document queued (PROCESSING, unclaimed) for this long without any worker
+    # claiming it (lost in-process task, lost broker message) is re-queued. Must
+    # exceed the longest expected wait for a processing slot.
+    DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS: int = Field(default=1800, ge=5)
+    # How often the API looks for abandoned/stale documents (0 disables).
+    DOCUMENT_PROCESSING_SWEEP_INTERVAL_SECONDS: int = Field(default=60, ge=0)
+    # Chunks embedded per provider round trip and inserted per INSERT statement.
+    DOCUMENT_EMBED_GROUP_SIZE: int = Field(default=64, ge=1)
+    DOCUMENT_INSERT_BATCH_SIZE: int = Field(default=200, ge=1)
 
     # --- Hybrid retrieval (Phase 5) ---
     # Fusion is Reciprocal Rank Fusion (RRF), not a weighted sum of raw scores -

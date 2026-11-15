@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
+from app.ingestion import runner
 from app.ingestion.errors import PermanentProcessingError, TransientProcessingError
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
@@ -142,8 +143,10 @@ async def _cleanup(fake_storage):
     async with _fresh_session() as session:
         for org_id in created_org_ids:
             docs = (
-                await session.execute(select(Document).where(Document.organization_id == org_id))
-            ).scalars().all()
+                (await session.execute(select(Document).where(Document.organization_id == org_id)))
+                .scalars()
+                .all()
+            )
             for doc in docs:
                 await session.execute(
                     delete(DocumentChunk).where(DocumentChunk.document_id == doc.id)
@@ -158,10 +161,8 @@ async def test_transient_failure_exhausting_retries_marks_document_failed(
 ):
     monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_MAX_RETRIES", 1)
     monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS", 0)
-    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
-    monkeypatch.setattr(
-        document_processing, "get_embedding_provider", lambda: _AlwaysTransientProvider()
-    )
+    monkeypatch.setattr(runner, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(runner, "get_embedding_provider", lambda: _AlwaysTransientProvider())
     document_id = await _make_document(fake_storage)
     _cleanup.append((await _fetch(document_id)).organization_id)
 
@@ -176,15 +177,13 @@ async def test_transient_failure_exhausting_retries_marks_document_failed(
 async def test_transient_failure_then_success_reaches_ready(fake_storage, monkeypatch, _cleanup):
     monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_MAX_RETRIES", 3)
     monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS", 0)
-    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(runner, "get_storage_provider", lambda: fake_storage)
     # One shared instance across calls - get_embedding_provider() is invoked
     # fresh on every attempt (matching production, which has no notion of
     # "the same provider instance across a retry"), so the fail-then-succeed
     # counter must live outside the factory closure to actually count down.
     flaky_provider = _FailsThenSucceedsProvider(fail_times=1)
-    monkeypatch.setattr(
-        document_processing, "get_embedding_provider", lambda: flaky_provider
-    )
+    monkeypatch.setattr(runner, "get_embedding_provider", lambda: flaky_provider)
     document_id = await _make_document(fake_storage)
     _cleanup.append((await _fetch(document_id)).organization_id)
 
@@ -198,10 +197,8 @@ async def test_transient_failure_then_success_reaches_ready(fake_storage, monkey
 async def test_permanent_failure_marks_failed_without_retry_bookkeeping(
     fake_storage, monkeypatch, _cleanup
 ):
-    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
-    monkeypatch.setattr(
-        document_processing, "get_embedding_provider", lambda: _AlwaysPermanentProvider()
-    )
+    monkeypatch.setattr(runner, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(runner, "get_embedding_provider", lambda: _AlwaysPermanentProvider())
     document_id = await _make_document(fake_storage)
     _cleanup.append((await _fetch(document_id)).organization_id)
 
@@ -217,11 +214,16 @@ async def test_unexpected_exception_never_leaks_raw_message(fake_storage, monkey
     def _boom():
         raise RuntimeError("internal secret: /etc/some/path leaked here")
 
-    monkeypatch.setattr(document_processing, "get_storage_provider", _boom)
+    monkeypatch.setattr(runner, "get_storage_provider", _boom)
     document_id = await _make_document(fake_storage)
     _cleanup.append((await _fetch(document_id)).organization_id)
 
     await _run_task(document_id)
+
+    refreshed = await _fetch(document_id)
+    assert refreshed.status == DocumentStatus.FAILED
+    assert "secret" not in refreshed.failure_reason
+    assert "/etc/" not in refreshed.failure_reason
 
 
 def _counter_value(metric, **labels) -> float:
@@ -233,9 +235,9 @@ async def test_successful_run_increments_success_metrics(fake_storage, monkeypat
     from app.rag.embedding.testing import DeterministicTestEmbeddingProvider
     from app.workers.tasks.document_processing import _TASK_NAME
 
-    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(runner, "get_storage_provider", lambda: fake_storage)
     monkeypatch.setattr(
-        document_processing,
+        runner,
         "get_embedding_provider",
         lambda: DeterministicTestEmbeddingProvider(dimensions=768),
     )
@@ -254,16 +256,12 @@ async def test_successful_run_increments_success_metrics(fake_storage, monkeypat
     )
 
 
-async def test_permanent_failure_increments_failure_metrics(
-    fake_storage, monkeypatch, _cleanup
-):
+async def test_permanent_failure_increments_failure_metrics(fake_storage, monkeypatch, _cleanup):
     from app.core.metrics import celery_task_failures_total, document_processing_total
     from app.workers.tasks.document_processing import _TASK_NAME
 
-    monkeypatch.setattr(document_processing, "get_storage_provider", lambda: fake_storage)
-    monkeypatch.setattr(
-        document_processing, "get_embedding_provider", lambda: _AlwaysPermanentProvider()
-    )
+    monkeypatch.setattr(runner, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(runner, "get_embedding_provider", lambda: _AlwaysPermanentProvider())
     before = _counter_value(document_processing_total, status="failure")
     before_task = _counter_value(celery_task_failures_total, task_name=_TASK_NAME)
 
@@ -274,8 +272,3 @@ async def test_permanent_failure_increments_failure_metrics(
     assert (await _fetch(document_id)).status == DocumentStatus.FAILED
     assert _counter_value(document_processing_total, status="failure") == before + 1
     assert _counter_value(celery_task_failures_total, task_name=_TASK_NAME) == before_task + 1
-
-    refreshed = await _fetch(document_id)
-    assert refreshed.status == DocumentStatus.FAILED
-    assert "secret" not in refreshed.failure_reason
-    assert "/etc/" not in refreshed.failure_reason

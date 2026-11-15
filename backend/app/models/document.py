@@ -80,6 +80,23 @@ class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # --- Processing lease (see app/ingestion/lease.py) ---
+    # Set when a worker claims the document; NULL while queued or finished. Every
+    # write a worker makes is conditional on still holding this token, so a stale
+    # or duplicate worker can never overwrite a newer one's outcome.
+    processing_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Last sign of life: when the document was queued (token NULL) or the claiming
+    # worker's last heartbeat (token set). The recovery sweep re-queues or fails
+    # PROCESSING documents whose heartbeat is too old.
+    processing_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Claims since the document was last uploaded or retried by a user. Bounds
+    # documents that keep killing their worker (each kill = one attempt).
+    processing_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
     organization: Mapped["Organization"] = relationship()
     uploader: Mapped["User | None"] = relationship()
     chunks: Mapped[list["DocumentChunk"]] = relationship(

@@ -89,3 +89,48 @@ def test_empty_document_produces_no_chunks():
 def test_estimate_token_count_is_positive_for_nonempty_text():
     assert estimate_token_count("hello world") > 0
     assert estimate_token_count("x") == 1
+
+
+def _run_with_timeout(doc: ParsedDocument, seconds: float = 5.0, **kwargs):
+    """chunk_document used to loop forever on some inputs; never hang the suite."""
+    import threading
+
+    result: dict = {}
+    thread = threading.Thread(
+        target=lambda: result.setdefault("chunks", chunk_document(doc, **kwargs)), daemon=True
+    )
+    thread.start()
+    thread.join(seconds)
+    assert "chunks" in result, "chunk_document did not terminate"
+    return result["chunks"]
+
+
+def test_short_paragraph_before_one_that_cannot_share_a_chunk_terminates():
+    """Regression: a <= overlap-sized paragraph followed by a paragraph too big to
+    fit beside it made chunk_document emit overlap-only chunks forever (duplicate
+    chunks until the process ran out of memory; a 3.8 MB PDF OOM-killed the API)."""
+    doc = _doc(ParsedElement(text="Short intro line here.\n\n" + ("word " * 396).strip()))
+    chunks = _run_with_timeout(doc, chunk_size_tokens=500, chunk_overlap_tokens=50)
+
+    assert [c.content for c in chunks] == ["Short intro line here.", ("word " * 396).strip()]
+
+
+def test_every_chunk_adds_new_text_and_chunking_always_terminates():
+    import random
+
+    rng = random.Random(1234)
+    for _ in range(300):
+        paragraphs = []
+        for _ in range(rng.randint(1, 25)):
+            words = rng.choice([1, 3, 8, 40, 120, 300, 390, 420, 499, 650])
+            paragraphs.append(" ".join(f"w{rng.randint(0, 9999)}" for _ in range(words)))
+        doc = _doc(ParsedElement(text="\n\n".join(paragraphs), page_number=1))
+        chunks = _run_with_timeout(doc, chunk_size_tokens=500, chunk_overlap_tokens=50)
+
+        assert chunks
+        # No chunk is a copy of the previous one's tail: each contributes new text.
+        for previous, chunk in zip(chunks, chunks[1:], strict=False):
+            assert not previous.content.endswith(chunk.content)
+        # Bounded output: overlap can't make the chunk count explode.
+        total_tokens = sum(estimate_token_count(p) for p in paragraphs)
+        assert len(chunks) <= 2 * (total_tokens // 450 + len(paragraphs)) + 1

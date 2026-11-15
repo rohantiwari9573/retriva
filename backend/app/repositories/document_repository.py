@@ -16,19 +16,13 @@ class DocumentRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_by_id_in_org(
-        self, document_id: uuid.UUID, org_id: uuid.UUID
-    ) -> Document | None:
+    async def get_by_id_in_org(self, document_id: uuid.UUID, org_id: uuid.UUID) -> Document | None:
         result = await self.db.execute(
-            select(Document).where(
-                Document.id == document_id, Document.organization_id == org_id
-            )
+            select(Document).where(Document.id == document_id, Document.organization_id == org_id)
         )
         return result.scalar_one_or_none()
 
-    async def get_by_content_hash(
-        self, org_id: uuid.UUID, content_hash: str
-    ) -> Document | None:
+    async def get_by_content_hash(self, org_id: uuid.UUID, content_hash: str) -> Document | None:
         result = await self.db.execute(
             select(Document).where(
                 Document.organization_id == org_id, Document.content_hash == content_hash
@@ -40,9 +34,7 @@ class DocumentRepository:
         self, org_id: uuid.UUID, *, page: int, page_size: int
     ) -> tuple[list[Document], int]:
         count_result = await self.db.execute(
-            select(func.count())
-            .select_from(Document)
-            .where(Document.organization_id == org_id)
+            select(func.count()).select_from(Document).where(Document.organization_id == org_id)
         )
         total = count_result.scalar_one()
 
@@ -88,9 +80,7 @@ class DocumentRepository:
     async def delete(self, document: Document) -> None:
         await self.db.delete(document)
 
-    async def mark_processing_if_failed(
-        self, document_id: uuid.UUID, org_id: uuid.UUID
-    ) -> bool:
+    async def mark_processing_if_failed(self, document_id: uuid.UUID, org_id: uuid.UUID) -> bool:
         """Atomically transition FAILED -> PROCESSING, returning whether this
         call was the one that made the transition.
 
@@ -111,7 +101,15 @@ class DocumentRepository:
                     Document.organization_id == org_id,
                     Document.status == DocumentStatus.FAILED,
                 )
-                .values(status=DocumentStatus.PROCESSING, failure_reason=None)
+                # Queued afresh: no lease, a new queue time for the recovery sweep,
+                # and a full set of attempts (a user retry starts over).
+                .values(
+                    status=DocumentStatus.PROCESSING,
+                    failure_reason=None,
+                    processing_token=None,
+                    processing_heartbeat_at=func.now(),
+                    processing_attempts=0,
+                )
             ),
         )
         return result.rowcount == 1

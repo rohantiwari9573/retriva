@@ -45,21 +45,17 @@ from app.core.exceptions import (
     ProcessingQueueError,
 )
 from app.core.logging import get_logger
+from app.ingestion.lease import mark_queued
+from app.ingestion.runner import dispatch
 from app.models.document import Document
 from app.models.enums import DocumentStatus
 from app.repositories.document_repository import DocumentRepository
 from app.services.file_validation import detect_and_validate_file_type
 from app.storage.base import StorageProvider
-from app.workers.tasks.document_processing import process_document
 
 logger = get_logger(__name__)
 
 _READ_CHUNK_SIZE = 1024 * 1024  # 1 MB
-
-# Strong references to in-flight inline processing tasks - the event loop
-# only keeps weak ones, so an unreferenced task can be garbage-collected
-# mid-run.
-_inline_tasks: set[asyncio.Task] = set()
 
 
 class DocumentService:
@@ -71,8 +67,13 @@ class DocumentService:
     async def upload(
         self, *, org_id: uuid.UUID, uploaded_by: uuid.UUID, file: UploadFile
     ) -> Document:
-        data, content_hash = await self._read_and_hash(file)
-        detected = detect_and_validate_file_type(file.filename or "", data)
+        # The upload is already in Starlette's spooled temp file (on disk past
+        # 1 MiB). It is hashed in 1 MiB pieces, validated, and streamed to storage
+        # from that file: the document is never held in memory as a whole.
+        size_bytes, content_hash = await self._hash_and_measure(file)
+        detected = await asyncio.to_thread(
+            detect_and_validate_file_type, file.filename or "", file.file
+        )
 
         existing = await self.documents.get_by_content_hash(org_id, content_hash)
         if existing is not None:
@@ -94,7 +95,7 @@ class DocumentService:
                 uploaded_by=uploaded_by,
                 original_filename=_sanitize_display_filename(file.filename or "upload"),
                 mime_type=detected.mime_type,
-                size_bytes=len(data),
+                size_bytes=size_bytes,
                 content_hash=content_hash,
             )
         except IntegrityError as exc:
@@ -108,14 +109,14 @@ class DocumentService:
 
         storage_key = f"organizations/{org_id}/documents/{document.id}{detected.extension}"
         try:
-            await self.storage.upload(storage_key, data, detected.mime_type)
+            await self.storage.upload_file(storage_key, file.file, detected.mime_type)
         except Exception:
             document.status = DocumentStatus.FAILED
             await self.db.commit()
             raise
 
         document.storage_key = storage_key
-        document.status = DocumentStatus.PROCESSING
+        mark_queued(document)
         await self.db.commit()
 
         await self._enqueue_processing(document)
@@ -148,32 +149,21 @@ class DocumentService:
         return document
 
     async def _enqueue_processing(self, document: Document) -> None:
-        if settings.DOCUMENT_PROCESSING_MODE == "inline":
-            # Task.apply() runs the task body locally (same retry/failure
-            # handling as a worker, no broker). It's synchronous and the task
-            # calls asyncio.run() itself, so it gets its own thread - and the
-            # request returns immediately, exactly as with a real worker.
-            task = asyncio.create_task(
-                asyncio.to_thread(process_document.apply, args=[str(document.id)])
-            )
-            _inline_tasks.add(task)
-            task.add_done_callback(_inline_tasks.discard)
-            return
         try:
-            await asyncio.to_thread(process_document.delay, str(document.id))
+            await dispatch(document.id)
         except Exception as exc:
             # The document is durably PROCESSING but nothing will ever pick
             # it up if the broker is unreachable - fail it now rather than
-            # leave it stuck forever with no worker ever assigned.
+            # leave it waiting for the recovery sweep with no worker assigned.
             logger.error("document_enqueue_failed", document_id=str(document.id), exc_info=exc)
             document.status = DocumentStatus.FAILED
             document.failure_reason = (
                 "Could not queue this document for processing. Please try again."
             )
+            document.processing_heartbeat_at = None
             await self.db.commit()
             raise ProcessingQueueError(
-                "Document uploaded, but could not be queued for processing. "
-                "Please retry."
+                "Document uploaded, but could not be queued for processing. Please retry."
             ) from exc
 
     async def list_for_org(
@@ -204,12 +194,14 @@ class DocumentService:
         await self.storage.delete(document.storage_key)
         await self.documents.delete(document)
 
-    async def _read_and_hash(self, file: UploadFile) -> tuple[bytes, str]:
+    async def _hash_and_measure(self, file: UploadFile) -> tuple[int, str]:
+        """Size and SHA-256 of the upload, reading it in bounded pieces and
+        keeping none of them; leaves the file rewound for validation/storage."""
         max_bytes = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
         hasher = hashlib.sha256()
-        chunks: list[bytes] = []
         total = 0
 
+        await file.seek(0)
         while True:
             chunk = await file.read(_READ_CHUNK_SIZE)
             if not chunk:
@@ -220,9 +212,9 @@ class DocumentService:
                     f"File exceeds the maximum size of {settings.MAX_DOCUMENT_SIZE_MB} MB."
                 )
             hasher.update(chunk)
-            chunks.append(chunk)
 
-        return b"".join(chunks), hasher.hexdigest()
+        await file.seek(0)
+        return total, hasher.hexdigest()
 
 
 def _sanitize_display_filename(filename: str) -> str:

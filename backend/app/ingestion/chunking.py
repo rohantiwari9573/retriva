@@ -136,6 +136,11 @@ def chunk_document(
     chunks: list[Chunk] = []
     current: list[_Unit] = []
     current_tokens = 0
+    # How many units at the start of `current` were carried over as overlap from
+    # the previous chunk. A chunk must always contain at least one new unit:
+    # flushing a chunk made only of carried overlap would recompute the same
+    # overlap and loop forever, appending duplicate chunks until memory ran out
+    # (a <= overlap-sized paragraph followed by one that doesn't fit beside it).
 
     def flush() -> None:
         if not current:
@@ -154,10 +159,16 @@ def chunk_document(
             )
         )
 
+    carried = 0
     index = 0
     while index < len(units):
         unit = units[index]
         if current and current_tokens + unit.token_count > chunk_size_tokens:
+            if carried == len(current):
+                # Only carried overlap so far and the next unit doesn't fit beside
+                # it: drop the overlap rather than emit an overlap-only chunk.
+                current, current_tokens, carried = [], 0, 0
+                continue
             flush()
             overlap: list[_Unit] = []
             overlap_tokens = 0
@@ -166,7 +177,7 @@ def chunk_document(
                     break
                 overlap.insert(0, prev)
                 overlap_tokens += prev.token_count
-            current, current_tokens = overlap, overlap_tokens
+            current, current_tokens, carried = overlap, overlap_tokens, len(overlap)
             continue
         current.append(unit)
         current_tokens += unit.token_count

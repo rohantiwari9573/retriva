@@ -7,10 +7,12 @@ newer Python/Windows combinations. Never trust the client-supplied filename
 extension or Content-Type header alone - both are attacker-controlled.
 """
 
+import codecs
 import io
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import BinaryIO
 
 from app.core.exceptions import UnsupportedFileTypeError
 
@@ -21,32 +23,50 @@ class DetectedFileType:
     mime_type: str
 
 
-def _is_pdf(data: bytes) -> bool:
-    return data.startswith(b"%PDF-")
+_TEXT_BLOCK_BYTES = 1024 * 1024
 
 
-def _is_docx(data: bytes) -> bool:
+def _is_pdf(file: BinaryIO) -> bool:
+    file.seek(0)
+    return file.read(5) == b"%PDF-"
+
+
+def _is_docx(file: BinaryIO) -> bool:
     # DOCX is a ZIP archive with a specific internal layout - checking just
     # the "PK\x03\x04" local-file-header signature would also match plain
     # .zip, .xlsx, .pptx, etc., so confirm a docx-specific entry exists too.
-    if not data.startswith(b"PK\x03\x04"):
+    # zipfile reads only the central directory from the (seekable) file.
+    file.seek(0)
+    if file.read(4) != b"PK\x03\x04":
         return False
+    file.seek(0)
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        with zipfile.ZipFile(file) as archive:
             names = archive.namelist()
     except zipfile.BadZipFile:
         return False
     return "word/document.xml" in names
 
 
-def _is_text(data: bytes) -> bool:
+def _is_text(file: BinaryIO) -> bool:
     # Binary files almost never decode cleanly as UTF-8 and null bytes are a
     # strong binary signal - good enough to distinguish "this is prose" from
     # "this is a renamed .exe" without a full content-sniffing library.
-    if b"\x00" in data:
-        return False
+    # Decoded incrementally in 1 MiB blocks, so memory stays flat.
+    file.seek(0)
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    while True:
+        block = file.read(_TEXT_BLOCK_BYTES)
+        if not block:
+            break
+        if b"\x00" in block:
+            return False
+        try:
+            decoder.decode(block)
+        except UnicodeDecodeError:
+            return False
     try:
-        data.decode("utf-8")
+        decoder.decode(b"", final=True)
     except UnicodeDecodeError:
         return False
     return True
@@ -55,7 +75,7 @@ def _is_text(data: bytes) -> bool:
 # Order matters: PDF and DOCX signatures are checked first since they're
 # unambiguous; TXT/MD share one "is it valid UTF-8 text" check and are
 # distinguished only by the extension the user chose.
-_VALIDATORS: dict[str, tuple[str, Callable[[bytes], bool]]] = {
+_VALIDATORS: dict[str, tuple[str, Callable[[BinaryIO], bool]]] = {
     ".pdf": ("application/pdf", _is_pdf),
     ".docx": (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -66,12 +86,13 @@ _VALIDATORS: dict[str, tuple[str, Callable[[bytes], bool]]] = {
 }
 
 
-def detect_and_validate_file_type(filename: str, data: bytes) -> DetectedFileType:
+def detect_and_validate_file_type(filename: str, data: bytes | BinaryIO) -> DetectedFileType:
     """Validates that the full file content actually matches the format
-    implied by `filename`'s extension. Requires the complete file (not just a
+    implied by `filename`'s extension. Needs the complete file (not just a
     head snippet) because DOCX's ZIP central directory lives at the end of
-    the file. Raises UnsupportedFileTypeError on any mismatch or unrecognized
-    extension."""
+    the file, so it takes a seekable file object (or bytes, wrapped) and reads
+    it in bounded pieces rather than as one buffer. Raises
+    UnsupportedFileTypeError on any mismatch or unrecognized extension."""
     extension = _extract_extension(filename)
     entry = _VALIDATORS.get(extension)
     if entry is None:
@@ -81,7 +102,12 @@ def detect_and_validate_file_type(filename: str, data: bytes) -> DetectedFileTyp
         )
 
     mime_type, validator = entry
-    if not validator(data):
+    file = io.BytesIO(data) if isinstance(data, bytes | bytearray) else data
+    try:
+        valid = validator(file)
+    finally:
+        file.seek(0)
+    if not valid:
         raise UnsupportedFileTypeError(
             f"File content does not match its '{extension}' extension. "
             "The file may be corrupted or mislabeled."

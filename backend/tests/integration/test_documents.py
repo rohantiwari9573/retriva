@@ -171,7 +171,7 @@ async def test_storage_failure_marks_document_failed_and_persists_despite_rollba
     async def _boom(*args, **kwargs):
         raise RuntimeError("simulated MinIO outage")
 
-    monkeypatch.setattr(fake_storage, "upload", _boom)
+    monkeypatch.setattr(fake_storage, "upload_file", _boom)
 
     org = await _register_and_create_org(client, "owner15@example.com", "Org O")
     response = await client.post(
@@ -338,7 +338,7 @@ async def _upload_and_fail(client, org_id: str, fake_storage, monkeypatch, filen
     async def _boom(*args, **kwargs):
         raise RuntimeError("simulated MinIO outage")
 
-    monkeypatch.setattr(fake_storage, "upload", _boom)
+    monkeypatch.setattr(fake_storage, "upload_file", _boom)
     await client.post(
         f"/api/v1/organizations/{org_id}/documents", files=_upload_files(filename)
     )
