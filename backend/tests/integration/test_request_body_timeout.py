@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import os
+import select
 import socket
 import threading
 import time
@@ -32,6 +33,9 @@ DEADLINE = 1.5
 WAIT = 10.0
 
 
+# Idle timeout for the many-stalled-clients test: long enough that all of them
+# are open at once on any machine, and within WAIT so their 408s are still read.
+STALLED_IDLE = 4.0
 UPLOAD_DEADLINE = 4.0
 UPLOAD_PATH = "/api/v1/organizations/org/documents"
 
@@ -178,7 +182,22 @@ def test_a_client_that_disconnects_mid_body_is_cleaned_up() -> None:
         assert _status(_get(port, "/no-such-route")) == 404
 
 
-def test_stalled_clients_do_not_hold_up_other_requests_and_are_all_released() -> None:
+def test_stalled_clients_do_not_hold_up_other_requests_and_are_all_released(
+    monkeypatch,
+) -> None:
+    """While 20 clients stall mid-body, another request is answered; then every
+    stalled client gets its 408 and every connection and task is released.
+
+    Ordering, not wall-clock speed: the stalled clients get an idle timeout long
+    enough that all 20 are certainly still open (and unanswered) when the other
+    request is answered, however slow the machine. The 0.3 s idle -> 408 path
+    itself is covered by the tests above. (Previously this used the 0.3 s idle
+    timeout and asserted the 404 came back in under 0.3 s: on a starved CI runner
+    the first stalled connections were already closed before the last were
+    accepted, or the 404 took 0.4-0.5 s, and the test failed with nothing wrong.)
+    """
+    monkeypatch.setattr("app.core.request_size.BODY_IDLE_SECONDS", STALLED_IDLE)
+    monkeypatch.setattr("app.core.request_size.BODY_MAX_SECONDS", STALLED_IDLE * 2)
     with _serve(real_app) as (server, port):
         stalled = [
             _start_post(port, "/api/v1/auth/login", declared=500, body=b"{") for _ in range(20)
@@ -186,9 +205,12 @@ def test_stalled_clients_do_not_hold_up_other_requests_and_are_all_released() ->
         try:
             _wait_until(lambda: len(server.server_state.connections) >= 20, "20 connections")
 
-            started = time.monotonic()
             assert _status(_get(port, "/no-such-route")) == 404
-            assert time.monotonic() - started < IDLE  # answered while they are still stalled
+            # Answered while they are still stalled: all 20 still open, none of
+            # them answered or closed yet (nothing readable, not even EOF).
+            assert len(server.server_state.connections) >= 20
+            readable, _, _ = select.select(stalled, [], [], 0)
+            assert readable == []
 
             assert all(_status(_read_to_eof(conn)) == 408 for conn in stalled)
         finally:
