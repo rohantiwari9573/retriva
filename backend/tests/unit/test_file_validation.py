@@ -123,6 +123,26 @@ def test_real_word_documents_are_accepted():
         assert detect_and_validate_file_type("real.docx", buffer.getvalue()).extension == ".docx"
 
 
+@pytest.mark.parametrize("field", ["record_offset", "directory_offset"])
+def test_zip64_offsets_beyond_the_file_are_rejected_not_a_500(field):
+    """Unsigned 64-bit offsets >= 2**63 made file.seek() raise OverflowError."""
+    import struct
+
+    data = _make_docx_bytes()
+    at = data.rfind(b"PK\x05\x06")
+    _, _, _, _, entries, size, offset, _ = struct.unpack("<4sHHHHIIH", data[at : at + 22])
+    huge = 2**63 + 5
+    directory_offset = huge if field == "directory_offset" else offset
+    zip64_record = struct.pack(
+        "<4sQHHIIQQQQ", b"PK\x06\x06", 44, 45, 45, 0, 0, entries, entries, size, directory_offset
+    )
+    record_offset = huge if field == "record_offset" else at
+    locator = struct.pack("<4sIQI", b"PK\x06\x07", 0, record_offset, 1)
+    end = struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, 0xFFFF, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0)
+    with pytest.raises(UnsupportedFileTypeError):
+        detect_and_validate_file_type("o.docx", data[:at] + zip64_record + locator + end)
+
+
 def test_a_zip64_docx_is_accepted():
     """The same archive with zip64 end records (as written for very large
     archives): sizes and counts come from the zip64 record."""

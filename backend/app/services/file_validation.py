@@ -63,12 +63,16 @@ def _central_directory(file: BinaryIO) -> bytes | None:
         if locator < 0 or tail[locator : locator + 4] != _ZIP64_EOCD_LOCATOR:
             return None
         zip64_offset = struct.unpack("<Q", tail[locator + 8 : locator + 16])[0]
+        if zip64_offset + 56 > size:  # also keeps seek() clear of 64-bit overflow
+            return None
         file.seek(zip64_offset)
         record = file.read(56)
         if len(record) < 56 or record[:4] != _ZIP64_EOCD:
             return None
         entries, directory_size, directory_offset = struct.unpack("<QQQ", record[32:56])
     if entries > _MAX_ZIP_ENTRIES or directory_size > _MAX_ZIP_DIRECTORY_BYTES:
+        return None
+    if directory_offset + directory_size > size:
         return None
     file.seek(directory_offset)
     directory = file.read(directory_size)
