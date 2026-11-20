@@ -149,13 +149,24 @@ stateDiagram-v2
 Redis being down still affects other things: in Celery mode, document uploads can't
 reach the broker. That's addressed in phase R1.
 
-## Known defects, not yet fixed
+## Known defects
 
-Reproduced and scheduled for later phases.
+Fixed (kept here for the history):
 
-| Defect | Evidence | Phase |
+| Defect | Fixed by |
+|---|---|
+| A document could stay in `PROCESSING` forever after a crash, broker data loss or restart | Processing lease and recovery sweep, [PR #4](https://github.com/rohantiwari9573/retriva/pull/4) (migration `c7a3e5d10b42`) |
+| Worker crashes didn't count as attempts, so redelivery had no limit | Lease attempt count, PR #4 |
+| A Postgres transaction stayed open during file download and embedding calls | Short compare-and-set transactions plus one final transaction, PR #4 |
+| Five concurrent large-PDF retries (or one text-heavy PDF, via a chunker infinite loop) OOM-killed the 512 MB API | Streaming, parser isolation in a resource-limited child process, bounded upload validation, PR #4 |
+| A 201 could be sent before the request's commit: register-then-use returned 401 | `Depends(get_db, scope="function")`, [PR #5](https://github.com/rohantiwari9573/retriva/pull/5) |
+| An ADMIN could demote or remove an OWNER; concurrent demotions could leave no owner | [PR #7](https://github.com/rohantiwari9573/retriva/pull/7) |
+| Vector search returned fewer rows than requested (IVFFlat on an empty table) | [PR #2](https://github.com/rohantiwari9573/retriva/pull/2) |
+
+Still open (found by the final review, not fixed):
+
+| Issue | Impact | Suggested fix |
 |---|---|---|
-| A document can stay in `PROCESSING` after a crash, broker data loss or (from reading the code) a production restart | Reproduced locally except the production case | R1 |
-| Worker crashes don't count as attempts, so redelivery has no limit | Reproduced | R1 |
-| A Postgres transaction stays open during file download and embedding calls | Reproduced | R1 |
-| **Vector search returns fewer rows than requested.** With 683 chunks and one tenant, the normal query plan returned 7 of 20. | [docs/benchmarks/R0.md](docs/benchmarks/R0.md) | Separate fix, [PR #2](https://github.com/rohantiwari9573/retriva/pull/2) |
+| `DEBUG` defaults to `True` | If production runs with it on, unhandled 500s return a plain-text traceback | Default to `False`, or refuse `DEBUG=true` in production |
+| Refresh-token rotation reads the token without `FOR UPDATE` | Two concurrent refreshes with one token can both succeed (two sessions) | `with_for_update()` or a conditional `UPDATE ... WHERE revoked_at IS NULL` |
+| Celery mode: a backlog older than `DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS` is re-dispatched every 30 min | Duplicate broker messages (each loses the claim harmlessly) | Track the last dispatch time |
