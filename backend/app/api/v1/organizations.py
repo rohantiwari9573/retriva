@@ -136,4 +136,6 @@ async def remove_member(
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> None:
-    await MembershipService(db).remove_member(org_id=ctx.organization.id, member_id=member_id)
+    await MembershipService(db).remove_member(
+        org_id=ctx.organization.id, member_id=member_id, actor_role=ctx.role
+    )

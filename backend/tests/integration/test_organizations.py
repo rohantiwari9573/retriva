@@ -318,3 +318,82 @@ async def test_remove_member(client):
 
     remaining = (await client.get(f"/api/v1/organizations/{org['id']}/members")).json()
     assert all(m["id"] != member_id for m in remaining)
+
+
+async def _org_with_two_owners_and_an_admin(client, tag: str):
+    owner_a, owner_b, admin = f"oa{tag}@example.com", f"ob{tag}@example.com", f"ad{tag}@example.com"
+    await _register(client, owner_a)
+    org = (await client.post("/api/v1/organizations", json={"name": f"Org {tag}"})).json()
+    await _register(client, owner_b)
+    await _register(client, admin)
+    client.cookies.clear()
+    await client.post("/api/v1/auth/login", json={"email": owner_a, "password": PASSWORD})
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members", json={"email": owner_b, "role": "OWNER"}
+    )
+    await client.post(
+        f"/api/v1/organizations/{org['id']}/members", json={"email": admin, "role": "ADMIN"}
+    )
+    members = (await client.get(f"/api/v1/organizations/{org['id']}/members")).json()
+    ids = {m["email"]: m["id"] for m in members}
+    return org, ids, owner_a, owner_b, admin
+
+
+async def _login(client, email):
+    client.cookies.clear()
+    await client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
+
+
+async def test_admin_cannot_demote_an_owner(client):
+    """OWNER > ADMIN: an admin used to be able to demote an owner (200)."""
+    org, ids, _, owner_b, admin = await _org_with_two_owners_and_an_admin(client, "x1")
+    await _login(client, admin)
+    response = await client.patch(
+        f"/api/v1/organizations/{org['id']}/members/{ids[owner_b]}", json={"role": "MEMBER"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+
+
+async def test_admin_cannot_remove_an_owner(client):
+    org, ids, _, owner_b, admin = await _org_with_two_owners_and_an_admin(client, "x2")
+    await _login(client, admin)
+    response = await client.delete(f"/api/v1/organizations/{org['id']}/members/{ids[owner_b]}")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+
+
+async def test_an_owner_can_still_demote_and_remove_another_owner(client):
+    org, ids, owner_a, owner_b, _ = await _org_with_two_owners_and_an_admin(client, "x3")
+    await _login(client, owner_a)
+    demoted = await client.patch(
+        f"/api/v1/organizations/{org['id']}/members/{ids[owner_b]}", json={"role": "ADMIN"}
+    )
+    assert demoted.status_code == 200
+    removed = await client.delete(f"/api/v1/organizations/{org['id']}/members/{ids[owner_b]}")
+    assert removed.status_code == 204
+    # ...but never the last one.
+    last = await client.delete(f"/api/v1/organizations/{org['id']}/members/{ids[owner_a]}")
+    assert last.status_code == 409
+    assert last.json()["error"]["code"] == "LAST_OWNER"
+
+
+async def test_an_admin_can_still_manage_plain_members(client):
+    await _register(client, "ox4@example.com")
+    org = (await client.post("/api/v1/organizations", json={"name": "Org x4"})).json()
+    await _register(client, "ax4@example.com")
+    await _register(client, "mx4@example.com")
+    await _login(client, "ox4@example.com")
+    for email, role in (("ax4@example.com", "ADMIN"), ("mx4@example.com", "MEMBER")):
+        await client.post(
+            f"/api/v1/organizations/{org['id']}/members", json={"email": email, "role": role}
+        )
+    members = (await client.get(f"/api/v1/organizations/{org['id']}/members")).json()
+    member_id = next(m["id"] for m in members if m["email"] == "mx4@example.com")
+    await _login(client, "ax4@example.com")
+    promoted = await client.patch(
+        f"/api/v1/organizations/{org['id']}/members/{member_id}", json={"role": "ADMIN"}
+    )
+    assert promoted.status_code == 200
+    removed = await client.delete(f"/api/v1/organizations/{org['id']}/members/{member_id}")
+    assert removed.status_code == 204
