@@ -13,10 +13,11 @@ import asyncio
 import time
 from contextlib import contextmanager
 from functools import lru_cache
+from typing import BinaryIO
 
 import boto3
 from botocore.client import Config as BotoConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import settings
 from app.core.exceptions import StorageError, StorageObjectNotFoundError
@@ -30,6 +31,8 @@ from app.core.telemetry import get_tracer
 
 logger = get_logger(__name__)
 tracer = get_tracer(__name__)
+
+_STREAM_CHUNK_BYTES = 1024 * 1024
 
 
 @contextmanager
@@ -107,6 +110,49 @@ class S3StorageProvider:
                 logger.error("storage_upload_failed", key=key, exc_info=exc)
                 raise StorageError("Failed to store the uploaded file.") from exc
 
+    async def upload_file(self, key: str, fileobj: BinaryIO, content_type: str) -> None:
+        """One PUT streamed from a seekable file: botocore reads the body in small
+        blocks, so memory stays flat whatever the size. Deliberately not boto3's
+        upload_fileobj, whose transfer manager runs ~10 threads with 8 MB parts."""
+        with _instrument("upload"):
+            try:
+                fileobj.seek(0)
+                await asyncio.to_thread(
+                    self._client.put_object,
+                    Bucket=self._bucket,
+                    Key=key,
+                    Body=fileobj,
+                    ContentType=content_type,
+                )
+            except ClientError as exc:
+                logger.error("storage_upload_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to store the uploaded file.") from exc
+
+    async def download_to_file(self, key: str, fileobj: BinaryIO) -> int:
+        """Streams the object into fileobj in 1 MiB pieces; returns bytes written."""
+        with _instrument("download"):
+            try:
+                return await asyncio.to_thread(self._download_to_file_sync, key, fileobj)
+            except ClientError as exc:
+                error_code = exc.response.get("Error", {}).get("Code", "")
+                if error_code in ("NoSuchKey", "404"):
+                    raise StorageObjectNotFoundError("The stored file could not be found.") from exc
+                logger.error("storage_download_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to read the stored file.") from exc
+            except (BotoCoreError, OSError) as exc:
+                # Connection reset/timeout mid-stream: transient, retryable.
+                logger.error("storage_download_failed", key=key, exc_info=exc)
+                raise StorageError("Failed to read the stored file.") from exc
+
+    def _download_to_file_sync(self, key: str, fileobj: BinaryIO) -> int:
+        response = self._client.get_object(Bucket=self._bucket, Key=key)
+        written = 0
+        for piece in response["Body"].iter_chunks(chunk_size=_STREAM_CHUNK_BYTES):
+            fileobj.write(piece)
+            written += len(piece)
+        fileobj.flush()
+        return written
+
     async def download(self, key: str) -> bytes:
         with _instrument("download"):
             try:
@@ -118,18 +164,14 @@ class S3StorageProvider:
             except ClientError as exc:
                 error_code = exc.response.get("Error", {}).get("Code", "")
                 if error_code in ("NoSuchKey", "404"):
-                    raise StorageObjectNotFoundError(
-                        "The stored file could not be found."
-                    ) from exc
+                    raise StorageObjectNotFoundError("The stored file could not be found.") from exc
                 logger.error("storage_download_failed", key=key, exc_info=exc)
                 raise StorageError("Failed to read the stored file.") from exc
 
     async def delete(self, key: str) -> None:
         with _instrument("delete"):
             try:
-                await asyncio.to_thread(
-                    self._client.delete_object, Bucket=self._bucket, Key=key
-                )
+                await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=key)
             except ClientError as exc:
                 logger.error("storage_delete_failed", key=key, exc_info=exc)
                 raise StorageError("Failed to delete the stored file.") from exc
@@ -161,11 +203,13 @@ class S3StorageProvider:
         first real upload will surface the problem clearly anyway."""
         try:
             self._client.head_bucket(Bucket=self._bucket)
+        except BotoCoreError as exc:  # endpoint unreachable, timeout, bad config
+            logger.warning("storage_bucket_ensure_failed", exc_info=exc)
         except ClientError:
             try:
                 self._client.create_bucket(Bucket=self._bucket)
                 logger.info("storage_bucket_created", bucket=self._bucket)
-            except ClientError as exc:
+            except (ClientError, BotoCoreError) as exc:
                 logger.warning("storage_bucket_ensure_failed", exc_info=exc)
 
 

@@ -12,34 +12,147 @@ sequenceDiagram
     participant Client
     participant API as FastAPI (documents.py)
     participant DB as Postgres
-    participant Broker as Redis (Celery broker)
-    participant Worker as Celery worker
+    participant Runner as Processing slot (inline) / Celery worker
     participant Storage as MinIO/S3
-    participant Embed as LM Studio (host)
+    participant Embed as Embedding provider
 
     Client->>API: POST /organizations/{id}/documents
-    API->>Storage: upload bytes
-    API->>DB: insert document (status=PROCESSING)
-    API->>Broker: process_document.delay(document_id)
+    API->>API: hash + validate the spooled upload in 1 MiB pieces
+    API->>Storage: stream the spooled file (single PUT)
+    API->>DB: insert document (PROCESSING, queued: no lease)
+    API->>Runner: dispatch(document_id)
     API-->>Client: 201 Created (status=PROCESSING)
 
-    Broker->>Worker: deliver task
-    Worker->>DB: SELECT ... FOR UPDATE (lock document)
-    Worker->>DB: DELETE existing chunks for document_id
-    Worker->>Storage: download(storage_key)
-    Worker->>Worker: parse -> normalize -> chunk
-    Worker->>Embed: POST /v1/embeddings (batched)
-    Embed-->>Worker: vectors
-    Worker->>DB: INSERT document_chunks (content + embedding)
-    Worker->>DB: UPDATE document SET status=READY, chunk_count, embedding_model
-    Worker->>DB: COMMIT
+    Runner->>DB: claim lease (conditional UPDATE, attempts + 1)
+    Runner->>Storage: stream to a private temp file
+    Runner->>Runner: parse from disk (text budget) -> normalize -> chunk
+    loop groups of DOCUMENT_EMBED_GROUP_SIZE
+        Runner->>Embed: POST /v1/embeddings
+        Runner->>DB: heartbeat (only while holding the lease)
+    end
+    Runner->>DB: lock row, re-check lease, replace chunks (batched), READY, COMMIT
 
     Note over Client,API: Frontend polls GET /documents while any row is PROCESSING
 ```
 
-On failure, the worker's own transaction rolls back (nothing partial is
-committed) and a **separate** transaction records `FAILED` + a safe
-`failure_reason` - see [Failure handling](#failure-handling-and-cleanup).
+No transaction stays open across the download, parsing or embedding calls, and
+the finishing transaction is all-or-nothing: a failure (or a crash) before it
+commits leaves no partial chunks. Every write a worker makes is conditional on
+still holding the document's lease, so a stale or duplicate worker writes
+nothing. See [Memory budget](#memory-budget) and
+[Concurrency, leases and recovery](#concurrency-leases-and-recovery).
+
+## Memory budget
+
+The API (inline mode) runs on a 512 MB instance, so ingestion is built to keep
+one document's memory bounded however large or pathological the file is, and to
+bound how many documents are processed at once.
+
+**Per document:**
+- Uploads are hashed and validated in 1 MiB pieces from Starlette's spooled temp
+  file and streamed to storage from it (one PUT; deliberately not boto3's
+  multi-threaded transfer manager). The file is never held in memory whole.
+- Processing streams the stored object to a private temp directory (removed on
+  success and failure; leftovers from killed processes are removed at startup and
+  on every sweep) and parsers read from disk: pypdf reads objects on demand; DOCX
+  is read with `lxml.iterparse`, freeing each paragraph (output identical to
+  python-docx); TXT/Markdown are decoded in blocks and consumed line by line.
+- Every parser charges a text budget and stops as soon as the document passes
+  `MAX_DOCUMENT_TEXT_LENGTH`, instead of extracting everything first. pypdf's
+  per-stream decompression limits are lowered to `PDF_MAX_DECOMPRESSED_STREAM_BYTES`
+  (10 MB, from pypdf's 75 MB).
+- Embeddings are kept as float32 (`array("f")`, ~3 KB per chunk instead of
+  ~25 KB as a list of Python floats) and chunks are inserted with batched Core
+  INSERTs of `DOCUMENT_INSERT_BATCH_SIZE` rows, not thousands of ORM objects.
+
+**Parser isolation:** per-format checks alone did not bound the parsers. An
+adversarial review found files that defeated them: a DOCX whose content sits in
+one table or one giant paragraph (the streaming parser can only free it at the
+end), an oversized `_rels/.rels`, a PDF of 500 pages each just under the stream
+cap, and millions of tiny elements. Parsing and chunking therefore run in a child
+process (`app/ingestion/isolated.py`, `python -m app.ingestion.isolated`). As its
+first actions the child:
+- caps its data segment with `RLIMIT_DATA` at `DOCUMENT_PARSE_MEMORY_LIMIT_MB`
+  (default 224; measured peak RSS is about the limit plus 17 MiB);
+- caps its CPU time with `RLIMIT_CPU` at `DOCUMENT_PARSE_TIMEOUT_SECONDS`
+  (default 120). This is CPU time, not wall time, so a busy or fractional-CPU
+  instance doesn't fail a valid document;
+- caps any file it writes at 64 MiB (`RLIMIT_FSIZE`);
+- arms `PR_SET_PDEATHSIG`, so the kernel kills it if the API or worker dies (it
+  never runs unsupervised), and exits if its parent is already gone;
+- turns off warning logs (pypdf can log tens of MB per page for crafted CMaps).
+
+The child's stderr goes to a file in the document's private work dir, and only
+its last 2 KB are read. It is never a pipe the parent buffers: a 58 KB PDF's
+warnings once grew the parent to an OOM kill. The chunks come back as JSON lines
+in the same dir. The child gets a minimal environment with no credentials, and
+runs in the work dir, so it reads no `.env`. The runtime-adjustable limits (text
+length, pages, DOCX size, PDF stream size, chunk size and overlap,
+`MAX_CHUNKS_PER_DOCUMENT`) are passed to it in a file, and the chunker stops as
+soon as a document passes `MAX_CHUNKS_PER_DOCUMENT`.
+
+How an outcome is classified:
+
+| Outcome | Classification |
+|---|---|
+| Parse error, too much text, memory limit reached, CPU limit reached, output too large | **Permanent:** the document itself is the cause, and it fails with a clear reason |
+| Killed from outside, e.g. by the kernel when the whole instance ran short of memory | **Transient:** the attempt limit bounds the retries |
+| Wall-clock backstop, `DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS` (default 900), when the child has used less than half its CPU budget (a starved instance) | **Transient** |
+| The same backstop after the child used at least half its CPU budget (on a fractional-CPU instance the backstop fires before the CPU limit) | **Permanent** (time limit) |
+| Crash, disk full, limits that could not be set | **Transient** |
+
+A memory overrun is recognised however the C library reports it: a
+`MemoryError` anywhere in the cause chain, zlib's "Unable to allocate", or the
+child's peak RSS at the limit. A cancelled parse (shutdown) kills and reaps the
+child.
+
+Separately from isolation:
+- the DOCX package's relationships part is capped at 1 MiB;
+- a sentence longer than the chunk size is window-split rather than kept whole,
+  so no chunk is far above the target size.
+
+`DOCUMENT_PARSE_ISOLATION=false` parses in-process instead. That is for
+development only, because it removes the bounds. The limits are enforced on
+Linux. Windows has no rlimits, and macOS doesn't enforce `RLIMIT_DATA`, so the
+child runs uncapped there.
+
+**Upload validation** runs in the API process, before anything is stored, so it
+is bounded too. A DOCX is checked by reading the archive's end-of-central-directory
+record (zip64 included) and its central directory, which may be at most 2 MiB and
+10,000 entries, never through `zipfile.ZipFile`. A 25 MB archive made of half a
+million directory entries took the API from 113 to 374 MiB per upload, and two at
+once OOM-killed a 512 MB instance. PDF and text checks read at most 1 MiB at a time.
+
+**Per process:** inline mode runs at most `DOCUMENT_PROCESSING_CONCURRENCY`
+documents at once (default 1) on a dedicated executor; others wait in memory,
+queued, and retry backoff is slept with no slot held. In Celery mode the worker's
+own `--concurrency` bounds it.
+
+**Measured** (API container capped at 512 MB, no swap; cgroup `memory.peak`):
+
+| Scenario | Before | After (with parser isolation) |
+|---|---|---|
+| Five 25 MiB PDFs uploaded at once | 461 MiB | 273 MiB, all READY |
+| Five large failed PDFs retried at once | OOM-killed | 278 MiB, all READY |
+| Five 3.8 MB text-heavy PDFs (1,950 chunks each) | OOM-killed | 218 MiB, all READY in 68 s |
+| One text-heavy PDF | OOM-killed (chunker loop) | 173 MiB, READY |
+| 25 MB Markdown of one-character lines | 420 MiB | 237 MiB, rejected early |
+| 390 KB DOCX holding 95 MB of XML | 433 MiB | 175 MiB, rejected early |
+| 0.8 MB PDF decompression bomb | 263 MiB | 171 MiB, rejected |
+| Review files: 95 MB of XML in one DOCX table / one paragraph / 2.6M tiny paragraphs | unbounded at `573cf0c` | 334-343 MiB, FAILED (memory limit) |
+| Review files: DOCX with a 90 MB `.rels`; 500-page PDF, each page just under the stream cap | unbounded at `573cf0c` | 172 / 339 MiB, FAILED with reason |
+| Review file: 58 KB PDF whose CMaps log ~26 MB of warnings per page | parent OOM-killed at `58e083a` | 218 MiB, FAILED (CPU limit) after 123 s |
+| One 20 MB sentence (single giant chunk before) | +117 MiB in the parent at `58e083a` | 223 MiB, FAILED (chunk limit) |
+| The 500-page PDF parsing while five 25 MiB PDFs upload and process | - | 364 MiB, PDF FAILED, five READY |
+
+The "After" column includes the parse child, which runs in the same container.
+Its limit (224 MiB) is what sets the ~340 MiB single-document worst case; the
+worst combination measured (364 MiB) leaves about 150 MiB of headroom on 512 MB.
+
+With `DOCUMENT_PROCESSING_CONCURRENCY=2` the same scenarios peaked at
+223-292 MB and five text-heavy PDFs finished in 40 s instead of 54 s. 1 is the
+default for a 512 MB instance (margin over the provider's own baseline); 2 is a
+reasonable setting for 1 GB or more.
 
 ## Why Celery tasks can't use FastAPI's dependency injection
 
@@ -138,9 +251,9 @@ fixed-N-character splitting:
 1. Each parsed element's text is normalized, then split into paragraphs
    (`\n\n`-separated).
 2. A paragraph larger than the target chunk size is itself split - first on
-   sentence boundaries (keeps sentences intact); if that produces no
-   boundaries (one giant run-on sentence), on a fixed character window
-   instead.
+   sentence boundaries (keeps sentences intact); a sentence that is itself
+   larger than the target (or a paragraph with no boundaries at all) is split
+   on a fixed character window instead.
 3. Paragraphs are packed greedily into chunks up to `CHUNK_SIZE_TOKENS`.
    A chunk's `page_number`/`section` come from its **first** paragraph.
 4. Overlap is carried at paragraph granularity: after closing a chunk, the
@@ -290,7 +403,7 @@ erDiagram
   no way to accidentally bypass the org check.
 - `UniqueConstraint(document_id, chunk_index)` - the idempotency backstop:
   even if two workers somehow both process the same document concurrently
-  (see [Concurrency](#concurrency-and-idempotency)), this constraint turns a
+  (see [Concurrency](#concurrency-leases-and-recovery)), this constraint turns a
   silent duplicate into a loud `IntegrityError` instead.
 - There's deliberately no vector index: search is exact (see `docs/retrieval.md`).
   The original `ivfflat` index on `embedding` with `vector_cosine_ops` supported
@@ -311,74 +424,83 @@ installed makes that round-trip idempotent.
 
 ## Retry behavior
 
-Every failure is classified as the pipeline runs:
+Every failure is classified as the pipeline runs (`app/ingestion/runner.py`):
 
 ```mermaid
 flowchart TD
-    A[process_document task] --> B{Exception type?}
-    B -->|TransientProcessingError| C[Schedule retry:<br/>exponential backoff]
-    B -->|PermanentProcessingError<br/>ParsingError, EmptyDocumentError,<br/>EmbeddingSchemaMismatchError,<br/>MAX_CHUNKS exceeded| D[Mark FAILED immediately]
-    B -->|Unexpected exception| E[Mark FAILED with a<br/>generic safe message]
-    C --> F{Retries remaining?}
-    F -->|Yes| G[Celery reschedules task]
-    F -->|No| D
-    G --> A
+    A[attempt: claim, process] --> B{Outcome}
+    B -->|TransientProcessingError,<br/>database connection error| C{Attempts left?}
+    C -->|Yes| D[Release lease: queued again;<br/>retry after exponential backoff]
+    C -->|No| E[FAILED: "failed after multiple attempts"]
+    B -->|PermanentProcessingError<br/>ParsingError, EmptyDocumentError,<br/>TextLimitExceededError,<br/>MAX_CHUNKS exceeded| F[FAILED immediately]
+    B -->|Unexpected exception| G[FAILED with a<br/>generic safe message]
+    D --> A
 ```
 
-- **Transient** (worth retrying): LM Studio temporarily unreachable, a 5xx
-  from the embedding backend, a transient storage read failure. Backoff is
-  exponential: `DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS * 2^attempt`
-  (default base 10s), capped at `DOCUMENT_PROCESSING_MAX_RETRIES` (default
-  3) attempts.
+- **Transient** (worth retrying): embedding provider unreachable or 5xx, a
+  storage read failure, the database unreachable mid-attempt. Backoff is
+  `DOCUMENT_PROCESSING_RETRY_BACKOFF_SECONDS * 2^(attempt-1)` (default 10 s,
+  20 s, 40 s), for at most `DOCUMENT_PROCESSING_MAX_RETRIES + 1` attempts
+  (default 4). Inline mode sleeps the backoff in the event loop without holding a
+  processing slot (previously `Task.apply()` retried back to back with no
+  backoff); Celery mode uses `self.retry(countdown=...)`.
 - **Permanent** (never worth retrying): a corrupt/unparseable file, an empty
-  document, a dimension mismatch, exceeding `MAX_CHUNKS_PER_DOCUMENT`, or a
-  storage object that's genuinely missing (`404`/`NoSuchKey` - distinct from
-  a transient storage error, since retrying a 404 changes nothing).
-- Retries use `self.retry(exc=..., countdown=..., max_retries=...)` called
-  manually (not `autoretry_for`), specifically so exhaustion can be caught
-  and turned into a `FAILED` status write. Celery's `task_acks_late=True`
-  (already configured since Phase 1) means a worker crash mid-task
-  redelivers the message - safe here because reprocessing is idempotent
-  (below).
+  document, too much extracted text, a dimension mismatch, exceeding
+  `MAX_CHUNKS_PER_DOCUMENT`, or a storage object that's genuinely missing.
+- **Attempts** are counted when a document is *claimed*, so an attempt that dies
+  mid-way (OOM kill, restart, worker crash) still counts. A document that keeps
+  killing its worker ends `FAILED` ("interrupted repeatedly") instead of being
+  redelivered forever. A user retry resets the count.
 
 ## Failure handling and cleanup
 
-If `process_document_pipeline` raises, its own database session is rolled
-back when the `async with` block exits (SQLAlchemy's `AsyncSession.close()`
-rolls back any open transaction) - so nothing from the failed attempt
-survives, including the `status=PROCESSING` flip and any chunks it deleted
-before failing further downstream. The `FAILED` status itself is then
-recorded in a **separate** session/transaction, opened only after the
-failure is already known - the same "commit the failure immediately, or
-`get_db`'s rollback erases it" pattern Phase 2/3 established for auth-theft
-detection and storage-upload failures.
+A failed attempt has written nothing to the document's chunks: chunks are only
+replaced in the final, all-or-nothing transaction. The outcome is recorded with
+a short conditional UPDATE (FAILED, or released for retry) that only applies
+while the attempt still holds the document's lease. If even that can't be
+recorded (database down), the lease simply expires and the recovery sweep
+re-queues the document.
 
 `failure_reason` is always a safe, human-readable string chosen by the code
-that raised the error (see `app/ingestion/errors.py`) - never a raw
-exception message, stack trace, file path, or connection string fragment. A
-last-resort `except Exception` at the top of the task guarantees this even
-for a genuinely unexpected error: the document gets a generic "An
-unexpected error occurred" message, and the real exception goes only to the
-structured log (`exc_info=exc`), never to the document row a client can
-read via the API.
+that raised the error (see `app/ingestion/errors.py`) - never a raw exception
+message, stack trace, file path, or connection string fragment. An unexpected
+error gets a generic "An unexpected error occurred" message and the real
+exception goes only to the structured log.
 
-If `.delay()` itself fails (e.g. the Redis broker is unreachable at upload
-time), the document would otherwise sit in `PROCESSING` forever with no
-worker ever assigned. `DocumentService._enqueue_processing` catches that and
-flips the document straight to `FAILED` with a retryable reason instead.
+If dispatching fails at upload time (e.g. the Celery broker is unreachable),
+`DocumentService._enqueue_processing` flips the document straight to `FAILED`
+with a retryable reason.
 
-## Concurrency and idempotency
+## Concurrency, leases and recovery
 
-Re-running the pipeline for the same `document_id` - a Celery retry, a
-`task_acks_late` redelivery after a worker crash, or a user hitting the
-retry endpoint - always starts by deleting that document's existing chunks
-before re-inserting. This makes the pipeline safe to run twice: a partial or
-duplicate run never leaves stray rows behind.
+A `PROCESSING` document is either *queued* (`processing_token` NULL,
+`processing_heartbeat_at` = when it was queued) or *claimed* (`processing_token`
+= the worker's token, `processing_heartbeat_at` = its last heartbeat). See
+`app/ingestion/lease.py`.
 
-The document row is locked with `SELECT ... FOR UPDATE` for the duration of
-processing. If two workers somehow both pick up the same `document_id`, the
-second blocks until the first commits or rolls back, then sees the document
-already `READY` and no-ops rather than deleting/re-inserting a second time.
+- **Claim** is one conditional UPDATE: it succeeds only for a queued document or
+  one whose lease expired (`DOCUMENT_PROCESSING_LEASE_SECONDS`, default 600 s).
+  A duplicate delivery (Celery `acks_late` redelivery, a sweep re-queue racing
+  the original) finds the document held, READY, or FAILED and does nothing.
+- **Finish** locks the row, re-checks the lease, deletes the document's old
+  chunks and inserts the new ones, and marks READY in one transaction. A worker
+  that lost its lease (expired and re-claimed) writes nothing.
+- **Recovery sweep** (`app/ingestion/recovery.py`), run by the API at startup and
+  every `DOCUMENT_PROCESSING_SWEEP_INTERVAL_SECONDS` (default 60 s): documents
+  queued for longer than `DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS` with no worker
+  claiming them, claimed with no heartbeat for the lease period, or with no
+  heartbeat at all (stranded before this mechanism existed) are re-queued and
+  dispatched again, or failed when out of attempts. Each re-queue is a
+  compare-and-set, so concurrent sweeps (several API instances) re-queue a
+  document once. Nothing can stay `PROCESSING` indefinitely: worst case is the
+  lease period plus one sweep interval.
+
+Measured on the 512 MB stack: an API killed mid-processing, a Celery worker
+killed mid-processing, Postgres stopped mid-processing and MinIO stopped while a
+document waited for its download all ended with the document `READY` after
+recovery, and seven documents stranded in `PROCESSING` by the old code were
+recovered on first startup (six READY, one correctly FAILED for exceeding the
+chunk limit).
 
 ## Security
 
@@ -442,13 +564,24 @@ something this phase needed.
 
 ## Known limitations
 
-- `processing_started_at` is only ever persisted on a **successful** run -
-  it's set inside the pipeline's own transaction, which rolls back on any
-  failure along with everything else from that attempt. A document that
-  ultimately fails will have `processing_started_at: null` even though
-  processing was, in fact, attempted. `processing_completed_at` and
-  `retry_count` are unaffected since they're written in the separate
-  failure-handling transaction.
+- A document that was queued in memory when an inline-mode API stopped is
+  re-queued by the next process's startup sweep; one whose claim was still live
+  waits for its lease to expire (default 600 s) plus one sweep interval.
+- A valid but very complex document (for example ~95 MB of DOCX table XML) that
+  needs more than `DOCUMENT_PARSE_MEMORY_LIMIT_MB` to parse fails rather than
+  being processed. Raising the limit trades API headroom for it, since the child
+  shares the instance's memory with the API while it runs.
+- Each document pays a child-process start for its parse: about 50 MiB RSS and
+  1.3 s (median of 10, Docker Desktop with a bind-mounted source tree), mostly
+  importing the app's settings and parsers. It is slower on a fractional-CPU
+  instance.
+- A document killed from outside (for example by the kernel when the whole
+  instance is out of memory) is retried, up to the attempt limit, at a cost of
+  one attempt each time. The child can't tell that case apart from its own
+  overrun, because the kill leaves no report.
+- Embeddings are still requested in groups and held for the whole document
+  (float32, ~3 KB per chunk) until the final transaction, so memory per document
+  grows with its chunk count, which `MAX_CHUNKS_PER_DOCUMENT` bounds.
 - Token counts are an approximation (~4 chars/token), not an exact
   tokenizer count - see [Chunking](#chunking) for why.
 - No OCR: a scanned/image-only PDF with no embedded text layer parses to

@@ -26,3 +26,8 @@ class ParsingError(PermanentProcessingError):
 
 class EmptyDocumentError(PermanentProcessingError):
     """Parsing succeeded but produced no extractable text."""
+
+
+class TextLimitExceededError(PermanentProcessingError):
+    """Parsing stopped because the extracted text passed MAX_DOCUMENT_TEXT_LENGTH.
+    Raised while parsing, so an oversized document never gets fully materialised."""

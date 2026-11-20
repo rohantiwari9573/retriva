@@ -1,5 +1,7 @@
 """FastAPI application entrypoint."""
 
+import asyncio
+import contextlib
 import time
 from contextlib import asynccontextmanager
 from typing import TypedDict
@@ -31,6 +33,8 @@ from app.core.telemetry import (
     instrument_redis,
     instrument_sqlalchemy,
 )
+from app.ingestion.recovery import sweep_forever
+from app.ingestion.runner import reset_inline_runner
 from app.ingestion.schema_check import (
     EmbeddingSchemaMismatchError,
     assert_embedding_dimension_matches,
@@ -86,8 +90,20 @@ async def lifespan(app: FastAPI):
         # as an opaque Postgres error deep inside a Celery worker.
         logger.error("embedding_schema_mismatch_at_startup", exc_info=exc)
         raise
-    yield
-    logger.info("app_shutdown")
+    # Recovers documents left PROCESSING by a crash/restart (including the one
+    # that just happened) and keeps doing so; see app/ingestion/recovery.py.
+    sweeper: asyncio.Task | None = None
+    if settings.DOCUMENT_PROCESSING_SWEEP_INTERVAL_SECONDS > 0:
+        sweeper = asyncio.create_task(sweep_forever(AsyncSessionLocal))
+    try:
+        yield
+    finally:
+        if sweeper is not None:
+            sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
+        reset_inline_runner()
+        logger.info("app_shutdown")
 
 
 class _DocsUrls(TypedDict):

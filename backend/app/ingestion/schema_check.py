@@ -36,8 +36,7 @@ async def get_embedding_column_dimension(session: AsyncSession) -> int:
     match = _VECTOR_TYPE_RE.match(format_type)
     if not match:
         raise EmbeddingSchemaMismatchError(
-            f"Could not determine document_chunks.embedding column width "
-            f"(got '{format_type}')."
+            f"Could not determine document_chunks.embedding column width (got '{format_type}')."
         )
     return int(match.group(1))
 

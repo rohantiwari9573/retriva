@@ -34,10 +34,12 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+from app.ingestion.errors import PermanentProcessingError
 from app.ingestion.normalization import normalize_text
 from app.ingestion.parsers.base import ParsedDocument
 
 _CHARS_PER_TOKEN = 4
+MAX_SECTION_CHARS = 500  # document_chunks.section is VARCHAR(500)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -85,38 +87,52 @@ def _paragraphs(document: ParsedDocument) -> list[_Unit]:
     return units
 
 
+def _windows(text: str, unit: _Unit, max_tokens: int) -> list[_Unit]:
+    window_chars = max_tokens * _CHARS_PER_TOKEN
+    return [
+        _Unit(
+            text=text[i : i + window_chars],
+            page_number=unit.page_number,
+            section=unit.section,
+            token_count=estimate_token_count(text[i : i + window_chars]),
+        )
+        for i in range(0, len(text), window_chars)
+    ]
+
+
 def _split_oversized(unit: _Unit, max_tokens: int) -> list[_Unit]:
     """A single paragraph larger than the whole target chunk size - split on
-    sentence boundaries first (keeps sentences intact); if it's one giant
-    sentence with no punctuation, fall back to a fixed character window
-    sized to approximately max_tokens."""
+    sentence boundaries first (keeps sentences intact); a sentence that is itself
+    larger than the target (or a paragraph with no punctuation at all) falls back
+    to a fixed character window sized to approximately max_tokens, so no chunk is
+    ever far above the target size."""
     sentences = [s for s in _SENTENCE_SPLIT_RE.split(unit.text) if s]
     if len(sentences) <= 1:
-        window_chars = max_tokens * _CHARS_PER_TOKEN
-        return [
-            _Unit(
-                text=unit.text[i : i + window_chars],
-                page_number=unit.page_number,
-                section=unit.section,
-                token_count=estimate_token_count(unit.text[i : i + window_chars]),
-            )
-            for i in range(0, len(unit.text), window_chars)
-        ]
+        return _windows(unit.text, unit, max_tokens)
 
     result: list[_Unit] = []
     current: list[str] = []
     current_tokens = 0
-    for sentence in sentences:
-        tokens = estimate_token_count(sentence)
-        if current and current_tokens + tokens > max_tokens:
+
+    def close() -> None:
+        nonlocal current, current_tokens
+        if current:
             text = " ".join(current)
             result.append(_Unit(text, unit.page_number, unit.section, current_tokens))
             current, current_tokens = [], 0
+
+    for sentence in sentences:
+        tokens = estimate_token_count(sentence)
+        if tokens > max_tokens:
+            # Previously kept whole: one 20 MB sentence became one 20 MB chunk.
+            close()
+            result.extend(_windows(sentence, unit, max_tokens))
+            continue
+        if current and current_tokens + tokens > max_tokens:
+            close()
         current.append(sentence)
         current_tokens += tokens
-    if current:
-        text = " ".join(current)
-        result.append(_Unit(text, unit.page_number, unit.section, current_tokens))
+    close()
     return result
 
 
@@ -125,7 +141,11 @@ def chunk_document(
     *,
     chunk_size_tokens: int,
     chunk_overlap_tokens: int,
+    max_chunks: int | None = None,
 ) -> list[Chunk]:
+    """max_chunks: stop as soon as the document would exceed it (raising the same
+    PermanentProcessingError the pipeline used to raise after chunking it all),
+    so a document of millions of tiny paragraphs isn't chunked to the end first."""
     units: list[_Unit] = []
     for paragraph in _paragraphs(document):
         if paragraph.token_count > chunk_size_tokens:
@@ -136,10 +156,20 @@ def chunk_document(
     chunks: list[Chunk] = []
     current: list[_Unit] = []
     current_tokens = 0
+    # How many units at the start of `current` were carried over as overlap from
+    # the previous chunk. A chunk must always contain at least one new unit:
+    # flushing a chunk made only of carried overlap would recompute the same
+    # overlap and loop forever, appending duplicate chunks until memory ran out
+    # (a <= overlap-sized paragraph followed by one that doesn't fit beside it).
 
     def flush() -> None:
         if not current:
             return
+        if max_chunks is not None and len(chunks) >= max_chunks:
+            raise PermanentProcessingError(
+                f"Document produced more than {max_chunks} chunks, exceeding the "
+                f"{max_chunks}-chunk processing limit."
+            )
         content = "\n\n".join(u.text for u in current)
         first = current[0]
         chunks.append(
@@ -147,17 +177,25 @@ def chunk_document(
                 chunk_index=len(chunks),
                 content=content,
                 page_number=first.page_number,
-                section=first.section,
+                # The column is VARCHAR(500); a longer heading (or Markdown
+                # "H1 > H2 > ..." path) would otherwise fail the whole document.
+                section=first.section[:MAX_SECTION_CHARS] if first.section else first.section,
                 char_count=len(content),
                 token_count=sum(u.token_count for u in current),
                 content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
             )
         )
 
+    carried = 0
     index = 0
     while index < len(units):
         unit = units[index]
         if current and current_tokens + unit.token_count > chunk_size_tokens:
+            if carried == len(current):
+                # Only carried overlap so far and the next unit doesn't fit beside
+                # it: drop the overlap rather than emit an overlap-only chunk.
+                current, current_tokens, carried = [], 0, 0
+                continue
             flush()
             overlap: list[_Unit] = []
             overlap_tokens = 0
@@ -166,7 +204,7 @@ def chunk_document(
                     break
                 overlap.insert(0, prev)
                 overlap_tokens += prev.token_count
-            current, current_tokens = overlap, overlap_tokens
+            current, current_tokens, carried = overlap, overlap_tokens, len(overlap)
             continue
         current.append(unit)
         current_tokens += unit.token_count
