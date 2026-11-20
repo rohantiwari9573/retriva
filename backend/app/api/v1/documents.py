@@ -27,7 +27,7 @@ router = APIRouter()
 async def upload_document(
     file: UploadFile = File(...),
     ctx: OrgContext = Depends(require_role(OrgRole.MEMBER)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> DocumentPublic:
     service = DocumentService(db, storage)
@@ -42,7 +42,7 @@ async def list_documents(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     ctx: OrgContext = Depends(get_org_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> DocumentListResponse:
     service = DocumentService(db, storage)
@@ -61,7 +61,7 @@ async def list_documents(
 async def get_document(
     document_id: uuid.UUID,
     ctx: OrgContext = Depends(get_org_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> DocumentPublic:
     service = DocumentService(db, storage)
@@ -76,7 +76,7 @@ async def get_document(
 async def download_document(
     document_id: uuid.UUID,
     ctx: OrgContext = Depends(get_org_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> DocumentDownloadResponse:
     service = DocumentService(db, storage)
@@ -91,7 +91,7 @@ async def download_document(
 async def delete_document(
     document_id: uuid.UUID,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> None:
     service = DocumentService(db, storage)
@@ -109,7 +109,7 @@ async def delete_document(
 async def retry_document_processing(
     document_id: uuid.UUID,
     ctx: OrgContext = Depends(require_role(OrgRole.MEMBER)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> DocumentPublic:
     service = DocumentService(db, storage)

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -32,7 +33,21 @@ class AuthService:
                 "An account with this email already exists.", code="EMAIL_ALREADY_REGISTERED"
             )
         hashed = hash_password(password)
-        user = await self.users.create(email=email, hashed_password=hashed, full_name=full_name)
+        try:
+            # A concurrent registration of the same email passes the check above,
+            # then blocks on the unique index until the first one commits. Its
+            # violation is a 409 like the check's, not a 500; the savepoint keeps
+            # the session usable.
+            async with self.db.begin_nested():
+                user = await self.users.create(
+                    email=email, hashed_password=hashed, full_name=full_name
+                )
+        except IntegrityError as exc:
+            if await self.users.get_by_email(email) is None:
+                raise  # some other constraint: not a duplicate email
+            raise ConflictError(
+                "An account with this email already exists.", code="EMAIL_ALREADY_REGISTERED"
+            ) from exc
         access_token, refresh_token = await self._issue_tokens(user)
         return user, access_token, refresh_token
 
@@ -80,9 +95,7 @@ class AuthService:
 
         user = await self.users.get_by_id(stored.user_id)
         if user is None or not user.is_active:
-            raise UnauthorizedError(
-                "Account not found or inactive.", code="ACCOUNT_INACTIVE"
-            )
+            raise UnauthorizedError("Account not found or inactive.", code="ACCOUNT_INACTIVE")
 
         access_token, new_raw_refresh = await self._issue_tokens(user)
         new_stored = await self.refresh_tokens.get_by_hash(hash_refresh_token(new_raw_refresh))
@@ -99,9 +112,7 @@ class AuthService:
     async def _issue_tokens(self, user: User) -> tuple[str, str]:
         access_token = create_access_token(user.id)
         raw_refresh, token_hash = generate_refresh_token()
-        expires_at = datetime.now(UTC) + timedelta(
-            days=settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
+        expires_at = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         await self.refresh_tokens.create(
             user_id=user.id, token_hash=token_hash, expires_at=expires_at
         )

@@ -30,7 +30,7 @@ from app.repositories.user_repository import UserRepository
 
 
 async def get_current_user(
-    request: Request, db: AsyncSession = Depends(get_db)
+    request: Request, db: AsyncSession = Depends(get_db, scope="function")
 ) -> User:
     token = request.cookies.get(ACCESS_COOKIE_NAME)
     if not token:
@@ -70,7 +70,7 @@ class OrgContext:
 async def get_org_context(
     organization_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> OrgContext:
     membership = await MembershipRepository(db).get(organization_id, current_user.id)
     if membership is None:

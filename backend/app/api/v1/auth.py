@@ -19,7 +19,9 @@ router = APIRouter()
     dependencies=[Depends(rate_limit("register", settings.RATE_LIMIT_REGISTER_PER_MINUTE))],
 )
 async def register(
-    payload: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)
+    payload: RegisterRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> UserPublic:
     service = AuthService(db)
     user, access_token, refresh_token = await service.register(
@@ -35,7 +37,7 @@ async def register(
     dependencies=[Depends(rate_limit("login", settings.RATE_LIMIT_LOGIN_PER_MINUTE))],
 )
 async def login(
-    payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)
+    payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db, scope="function")
 ) -> UserPublic:
     attempt = await reserve_login_attempt(payload.email)
     credential_failure = False
@@ -60,7 +62,7 @@ async def login(
     dependencies=[Depends(rate_limit("refresh", settings.RATE_LIMIT_REFRESH_PER_MINUTE))],
 )
 async def refresh(
-    request: Request, response: Response, db: AsyncSession = Depends(get_db)
+    request: Request, response: Response, db: AsyncSession = Depends(get_db, scope="function")
 ) -> UserPublic:
     raw_refresh = request.cookies.get(REFRESH_COOKIE_NAME)
     if not raw_refresh:
@@ -74,7 +76,7 @@ async def refresh(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    request: Request, response: Response, db: AsyncSession = Depends(get_db)
+    request: Request, response: Response, db: AsyncSession = Depends(get_db, scope="function")
 ) -> None:
     raw_refresh = request.cookies.get(REFRESH_COOKIE_NAME)
     if raw_refresh:

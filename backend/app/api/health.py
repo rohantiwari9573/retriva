@@ -28,7 +28,7 @@ async def liveness() -> dict[str, str]:
 
 @router.get("/readiness")
 async def readiness(
-    request: Request, response: Response, db: AsyncSession = Depends(get_db)
+    request: Request, response: Response, db: AsyncSession = Depends(get_db, scope="function")
 ) -> dict[str, object]:
     checks: dict[str, str] = {}
     healthy = True

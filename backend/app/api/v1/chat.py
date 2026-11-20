@@ -60,7 +60,7 @@ router = APIRouter()
 async def chat(
     body: ChatRequest,
     ctx: OrgContext = Depends(get_org_context),  # VIEWER+ may ask, per RBAC design
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
     llm_provider: LLMProvider = Depends(get_llm_provider),
 ) -> ChatResponse:
@@ -89,7 +89,7 @@ async def chat(
 async def chat_stream(
     body: ChatRequest,
     ctx: OrgContext = Depends(get_org_context),  # VIEWER+ may ask, per RBAC design
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
     llm_provider: LLMProvider = Depends(get_llm_provider),
     session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
@@ -174,7 +174,7 @@ async def chat_stream(
 async def regenerate_chat_stream(
     conversation_id: uuid.UUID,
     ctx: OrgContext = Depends(get_org_context),  # VIEWER+ may ask, per RBAC design
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
     llm_provider: LLMProvider = Depends(get_llm_provider),
     session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
@@ -234,7 +234,7 @@ async def list_conversations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     ctx: OrgContext = Depends(get_org_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ConversationListResponse:
     service = ConversationService(db)
     conversations, total = await service.list_for_org(
@@ -254,7 +254,7 @@ async def list_conversations(
 async def get_conversation(
     conversation_id: uuid.UUID,
     ctx: OrgContext = Depends(get_org_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ConversationDetail:
     service = ConversationService(db)
     conversation, messages = await service.get_with_messages(conversation_id, ctx.organization.id)
@@ -274,7 +274,7 @@ async def get_conversation(
 async def delete_conversation(
     conversation_id: uuid.UUID,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> None:
     service = ConversationService(db)
     conversation = await service.get_or_404(conversation_id, ctx.organization.id)
@@ -295,7 +295,7 @@ async def delete_conversation(
 async def retrieval_debug(
     body: RetrievalDebugRequest,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
 ) -> RetrievalDebugResponse:
     """Admin-only. Exposes raw per-retriever scores and the final fused
