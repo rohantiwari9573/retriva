@@ -67,7 +67,13 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Per-request session with unit-of-work semantics: commits if the route
     completed without raising, rolls back otherwise. Routes/services never
-    need to call session.commit() themselves."""
+    need to call session.commit() themselves.
+
+    Always declare it as `Depends(get_db, scope="function")`. FastAPI's default
+    ("request") scope runs this teardown, and so the commit, after the response
+    has been sent: a client could get a 201 for a row that isn't committed yet
+    (register, then an immediate request -> 401), or for one whose commit then
+    fails. tests/integration/test_commit_before_response.py enforces this."""
     async with AsyncSessionLocal() as session:
         try:
             yield session

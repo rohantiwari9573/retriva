@@ -30,7 +30,7 @@ def _member_to_public(member) -> MemberPublic:  # noqa: ANN001 - OrganizationMem
 async def create_organization(
     payload: OrganizationCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> OrganizationPublic:
     org = await OrganizationService(db).create_organization(name=payload.name, owner=current_user)
     return OrganizationPublic(
@@ -41,7 +41,7 @@ async def create_organization(
 @router.get("", response_model=list[OrganizationPublic])
 async def list_organizations(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[OrganizationPublic]:
     memberships = await OrganizationService(db).list_for_user(current_user.id)
     return [
@@ -71,7 +71,7 @@ async def get_organization(ctx: OrgContext = Depends(get_org_context)) -> Organi
 async def update_organization(
     payload: OrganizationUpdate,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> OrganizationPublic:
     org = await OrganizationService(db).update(ctx.organization, name=payload.name)
     return OrganizationPublic(
@@ -82,7 +82,7 @@ async def update_organization(
 @router.get("/{organization_id}/members", response_model=list[MemberPublic])
 async def list_members(
     ctx: OrgContext = Depends(get_org_context),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[MemberPublic]:
     members = await MembershipService(db).list_members(ctx.organization.id)
     return [_member_to_public(m) for m in members]
@@ -96,7 +96,7 @@ async def list_members(
 async def add_member(
     payload: AddMemberRequest,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> MemberPublic:
     member = await MembershipService(db).add_member(
         org_id=ctx.organization.id,
@@ -116,7 +116,7 @@ async def update_member_role(
     member_id: uuid.UUID,
     payload: UpdateMemberRoleRequest,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> MemberPublic:
     service = MembershipService(db)
     await service.update_role(
@@ -134,6 +134,6 @@ async def update_member_role(
 async def remove_member(
     member_id: uuid.UUID,
     ctx: OrgContext = Depends(require_role(OrgRole.ADMIN)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> None:
     await MembershipService(db).remove_member(org_id=ctx.organization.id, member_id=member_id)
