@@ -56,8 +56,13 @@ class MembershipService:
             raise ForbiddenError(
                 "Only an owner can grant the owner role.", code="INSUFFICIENT_ROLE"
             )
+        if target.role == OrgRole.OWNER and actor_role != OrgRole.OWNER:
+            raise ForbiddenError(
+                "Only an owner can change an owner's role.", code="INSUFFICIENT_ROLE"
+            )
         if target.role == OrgRole.OWNER and new_role != OrgRole.OWNER:
-            owners = await self.memberships.count_owners(org_id)
+            # Locked, so two owners demoting each other at once can't both pass.
+            owners = await self.memberships.count_owners(org_id, lock=True)
             if owners <= 1:
                 raise ConflictError(
                     "Cannot change the role of the last remaining owner.", code="LAST_OWNER"
@@ -66,15 +71,15 @@ class MembershipService:
         return target
 
     async def remove_member(
-        self, *, org_id: uuid.UUID, member_id: uuid.UUID
+        self, *, org_id: uuid.UUID, member_id: uuid.UUID, actor_role: OrgRole
     ) -> None:
         target = await self.memberships.get_by_id(member_id)
         if target is None or target.organization_id != org_id:
             raise NotFoundError("Member not found.", code="MEMBER_NOT_FOUND")
+        if target.role == OrgRole.OWNER and actor_role != OrgRole.OWNER:
+            raise ForbiddenError("Only an owner can remove an owner.", code="INSUFFICIENT_ROLE")
         if target.role == OrgRole.OWNER:
-            owners = await self.memberships.count_owners(org_id)
+            owners = await self.memberships.count_owners(org_id, lock=True)
             if owners <= 1:
-                raise ConflictError(
-                    "Cannot remove the last remaining owner.", code="LAST_OWNER"
-                )
+                raise ConflictError("Cannot remove the last remaining owner.", code="LAST_OWNER")
         await self.memberships.delete(target)

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -53,16 +53,17 @@ class MembershipRepository:
         )
         return list(result.scalars())
 
-    async def count_owners(self, org_id: uuid.UUID) -> int:
-        result = await self.db.execute(
-            select(func.count())
-            .select_from(OrganizationMember)
-            .where(
-                OrganizationMember.organization_id == org_id,
-                OrganizationMember.role == OrgRole.OWNER,
-            )
+    async def count_owners(self, org_id: uuid.UUID, *, lock: bool = False) -> int:
+        """lock=True row-locks the owners until the transaction ends, so a
+        concurrent demotion/removal of another owner waits and then sees this
+        one's result (FOR UPDATE can't be combined with count())."""
+        query = select(OrganizationMember.id).where(
+            OrganizationMember.organization_id == org_id,
+            OrganizationMember.role == OrgRole.OWNER,
         )
-        return result.scalar_one()
+        if lock:
+            query = query.with_for_update()
+        return len((await self.db.execute(query)).scalars().all())
 
     async def create(
         self, *, org_id: uuid.UUID, user_id: uuid.UUID, role: OrgRole
