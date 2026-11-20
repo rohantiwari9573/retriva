@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from alembic import command
 from app.core.config import settings
 from app.core.database import get_db, get_session_factory
+from app.core.rate_limit import reset_fallback_state
 from app.main import app
 from app.rag.embedding.dependency import get_embedding_provider
 from app.rag.embedding.testing import DeterministicTestEmbeddingProvider
@@ -86,6 +87,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture(autouse=True)
 async def _flush_rate_limits() -> AsyncGenerator[None, None]:
+    reset_fallback_state()
     redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     await redis.flushdb()
     await redis.aclose()

@@ -2,6 +2,7 @@
 
 import time
 from contextlib import asynccontextmanager
+from typing import TypedDict
 
 import structlog
 from fastapi import FastAPI, Request
@@ -19,6 +20,7 @@ from app.core.metrics import (
     http_requests_in_flight,
     http_requests_total,
 )
+from app.core.migrations import assert_schema_is_current
 from app.core.request_id import resolve_request_id
 from app.core.request_size import RequestBodyLimitMiddleware
 from app.core.telemetry import (
@@ -61,12 +63,19 @@ def _check_production_config() -> None:
             "allow_credentials=True this would allow any site to make "
             "authenticated requests on a user's behalf)."
         )
+    if settings.EDGE_PROXY_SHARED_SECRET and len(settings.EDGE_PROXY_SHARED_SECRET) < 32:
+        raise RuntimeError(
+            "EDGE_PROXY_SHARED_SECRET must be at least 32 characters - a guessable "
+            "value would let clients choose their own rate-limit identity."
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("app_startup", environment=settings.ENVIRONMENT)
     _check_production_config()
+    async with AsyncSessionLocal() as session:
+        app.state.schema_state = await assert_schema_is_current(session)
     get_s3_storage_provider().ensure_bucket_exists()
     try:
         async with AsyncSessionLocal() as session:
@@ -81,12 +90,26 @@ async def lifespan(app: FastAPI):
     logger.info("app_shutdown")
 
 
+class _DocsUrls(TypedDict):
+    docs_url: str | None
+    redoc_url: str | None
+    openapi_url: str | None
+
+
+def api_docs_urls(environment: str) -> _DocsUrls:
+    """Production publishes no schema: disabling only /docs left /openapi.json, the
+    full route and model map the docs page renders, public. Nothing consumes it in
+    production, so it goes too; development and tests keep both."""
+    if environment == "production":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": None, "openapi_url": "/openapi.json"}
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
     lifespan=lifespan,
-    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
-    redoc_url=None,
+    **api_docs_urls(settings.ENVIRONMENT),
 )
 
 instrument_fastapi_app(app)

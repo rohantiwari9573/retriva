@@ -1,0 +1,176 @@
+{
+  "ingestion": {
+    "small_4kb": {
+      "documents": 20,
+      "outcomes": {
+        "READY": 20
+      },
+      "chunks_per_document": 3.0,
+      "mean_ms": 156.28,
+      "p50_ms": 117.88,
+      "p95_ms": 201.24,
+      "p99_ms": 640.1,
+      "max_ms": 640.1
+    },
+    "large_400kb": {
+      "documents": 3,
+      "outcomes": {
+        "READY": 3
+      },
+      "chunks_per_document": 207.7,
+      "mean_ms": 913.83,
+      "p50_ms": 803.92,
+      "p95_ms": 1134.85,
+      "p99_ms": 1134.85,
+      "max_ms": 1134.85
+    }
+  },
+  "api_latency": [
+    {
+      "name": "GET /health",
+      "requests": 2000,
+      "concurrency": 20,
+      "expected_status": 200,
+      "statuses": {
+        "200": 2000
+      },
+      "error_rate": 0.0,
+      "requests_per_second": 97.0,
+      "mean_ms": 205.57,
+      "p50_ms": 136.26,
+      "p95_ms": 594.3,
+      "p99_ms": 902.65,
+      "max_ms": 1861.44
+    },
+    {
+      "name": "GET /readiness",
+      "requests": 500,
+      "concurrency": 10,
+      "expected_status": 200,
+      "statuses": {
+        "200": 500
+      },
+      "error_rate": 0.0,
+      "requests_per_second": 107.4,
+      "mean_ms": 92.47,
+      "p50_ms": 86.91,
+      "p95_ms": 142.97,
+      "p99_ms": 163.27,
+      "max_ms": 181.32
+    },
+    {
+      "name": "POST /auth/login (correct)",
+      "requests": 100,
+      "concurrency": 4,
+      "expected_status": 200,
+      "statuses": {
+        "200": 100
+      },
+      "error_rate": 0.0,
+      "requests_per_second": 11.1,
+      "mean_ms": 357.46,
+      "p50_ms": 338.98,
+      "p95_ms": 432.48,
+      "p99_ms": 826.66,
+      "max_ms": 837.43
+    },
+    {
+      "name": "POST /auth/login (wrong password)",
+      "requests": 100,
+      "concurrency": 4,
+      "expected_status": 401,
+      "statuses": {
+        "401": 100
+      },
+      "error_rate": 0.0,
+      "requests_per_second": 12.3,
+      "mean_ms": 321.69,
+      "p50_ms": 315.14,
+      "p95_ms": 392.51,
+      "p99_ms": 479.64,
+      "max_ms": 489.27
+    },
+    {
+      "name": "GET /documents",
+      "requests": 500,
+      "concurrency": 10,
+      "expected_status": 200,
+      "statuses": {
+        "200": 500
+      },
+      "error_rate": 0.0,
+      "requests_per_second": 97.9,
+      "mean_ms": 101.54,
+      "p50_ms": 90.67,
+      "p95_ms": 185.33,
+      "p99_ms": 315.98,
+      "max_ms": 347.69
+    },
+    {
+      "name": "POST /retrieval/debug",
+      "requests": 200,
+      "concurrency": 4,
+      "expected_status": 200,
+      "statuses": {
+        "200": 200
+      },
+      "error_rate": 0.0,
+      "requests_per_second": 26.9,
+      "mean_ms": 148.14,
+      "p50_ms": 143.38,
+      "p95_ms": 190.35,
+      "p99_ms": 298.4,
+      "max_ms": 302.26
+    }
+  ],
+  "redis": {
+    "PING": {
+      "samples": 1000,
+      "mean_ms": 0.14,
+      "p50_ms": 0.09,
+      "p95_ms": 0.3,
+      "p99_ms": 0.45,
+      "max_ms": 11.76
+    },
+    "INCR": {
+      "samples": 1000,
+      "mean_ms": 0.12,
+      "p50_ms": 0.1,
+      "p95_ms": 0.26,
+      "p99_ms": 0.41,
+      "max_ms": 0.86
+    }
+  },
+  "database": {
+    "document_list": {
+      "repeats": 7,
+      "median_execution_ms": 0.023,
+      "rows_returned": 20,
+      "scan_nodes": [
+        "Seq Scan on documents"
+      ]
+    },
+    "keyword_search": {
+      "repeats": 7,
+      "median_execution_ms": 1.165,
+      "rows_returned": 20,
+      "scan_nodes": [
+        "Seq Scan on document_chunks",
+        "Seq Scan on documents"
+      ]
+    },
+    "vector_search": {
+      "repeats": 7,
+      "median_execution_ms": 0.127,
+      "rows_returned": 8,
+      "scan_nodes": [
+        "Index Scan on documents_pkey",
+        "Index Scan on ix_document_chunks_embedding_cosine"
+      ]
+    },
+    "row_counts": {
+      "documents": 23,
+      "document_chunks": 683
+    }
+  }
+}

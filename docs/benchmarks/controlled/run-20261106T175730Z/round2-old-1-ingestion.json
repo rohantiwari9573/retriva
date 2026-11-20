@@ -1,0 +1,71 @@
+{
+ "state": {
+  "email": "bench-d679b7c65fc1@example.com",
+  "organization_id": "94500f15-0b8e-4a44-95a8-4489d8005605"
+ },
+ "ingestion": {
+  "small_4kb": {
+   "documents": 20,
+   "outcomes": {
+    "READY": 20
+   },
+   "chunks_per_document": 3.0,
+   "mean_ms": 124.28,
+   "p50_ms": 99.05,
+   "p95_ms": 186.06,
+   "p99_ms": 438.44,
+   "max_ms": 438.44
+  },
+  "large_400kb": {
+   "documents": 3,
+   "outcomes": {
+    "READY": 3
+   },
+   "chunks_per_document": 207.7,
+   "mean_ms": 550.59,
+   "p50_ms": 533.08,
+   "p95_ms": 603.85,
+   "p99_ms": 603.85,
+   "max_ms": 603.85
+  }
+ },
+ "resources": {
+  "backend": {
+   "samples": 1,
+   "cpu_percent_mean": 0.1,
+   "cpu_percent_max": 0.1,
+   "mem_mb_max": 120.1
+  },
+  "minio": {
+   "samples": 1,
+   "cpu_percent_mean": 0.2,
+   "cpu_percent_max": 0.2,
+   "mem_mb_max": 74.4
+  },
+  "postgres": {
+   "samples": 1,
+   "cpu_percent_mean": 1.8,
+   "cpu_percent_max": 1.8,
+   "mem_mb_max": 48.3
+  },
+  "redis": {
+   "samples": 1,
+   "cpu_percent_mean": 0.5,
+   "cpu_percent_max": 0.5,
+   "mem_mb_max": 3.9
+  },
+  "stub-ai": {
+   "samples": 1,
+   "cpu_percent_mean": 5.6,
+   "cpu_percent_max": 5.6,
+   "mem_mb_max": 17.2
+  },
+  "worker": {
+   "samples": 1,
+   "cpu_percent_mean": 11.7,
+   "cpu_percent_max": 11.7,
+   "mem_mb_max": 178.8
+  }
+ },
+ "seconds": 7.150948524475098
+}

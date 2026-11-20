@@ -563,9 +563,11 @@ user to quote in a bug report, without exposing any backend internals
 `GET /health`, `/liveness`, `/readiness` (`app/api/health.py`) are
 unchanged by Phase 8 - reviewed and found already correct: `/health`/
 `/liveness` do no I/O (an orchestrator shouldn't kill a slow-but-alive
-process), `/readiness` checks Postgres/Redis reachability and returns a
-plain `{"postgres": "ok"|"unavailable", "redis": "ok"|"unavailable"}`
-shape with no connection strings or credentials in the response.
+process), `/readiness` checks Postgres/Redis reachability and reports each
+as `ok` or `unavailable`, with no connection strings or credentials in the
+response. Only Postgres makes it fail: a Redis outage returns 200 and lists
+`redis` under `degraded`, because rate limiting has a per-process fallback
+(see ARCHITECTURE.md). The `rate_limit_fallback_active` gauge shows that state.
 
 ## Verification performed
 

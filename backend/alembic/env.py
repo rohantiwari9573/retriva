@@ -12,6 +12,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
+from app.core.migrations import sync_database_url
 
 # Import all models so they're registered on Base.metadata before autogenerate runs.
 from app.models import *  # noqa: F401,F403
@@ -24,13 +25,9 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def _sync_database_url() -> str:
-    return settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://")
-
-
 def run_migrations_offline() -> None:
     context.configure(
-        url=_sync_database_url(),
+        url=sync_database_url(settings.DATABASE_URL),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -41,7 +38,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = _sync_database_url()
+    configuration["sqlalchemy.url"] = sync_database_url(settings.DATABASE_URL)
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",

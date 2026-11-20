@@ -231,6 +231,19 @@ rate_limit_allowed_total = Counter(
 rate_limit_rejected_total = Counter(
     "rate_limit_rejected_total", "Requests rejected by a rate limit.", ["endpoint"]
 )
+rate_limit_fallback_active = Gauge(
+    "rate_limit_fallback_active",
+    "1 while this process counts rate limits in memory because Redis is unreachable.",
+)
+rate_limit_fallback_requests_total = Counter(
+    "rate_limit_fallback_requests_total",
+    "Rate-limit checks served by the in-memory fallback.",
+)
+client_ip_assertion_rejected_total = Counter(
+    "client_ip_assertion_rejected_total",
+    "Edge-proxy client IP assertions that failed verification.",
+    ["reason"],
+)
 
 # --- Security events (operational counters, not a replacement for the
 # Phase 7 audit log - see docs/security.md for the full model) ---

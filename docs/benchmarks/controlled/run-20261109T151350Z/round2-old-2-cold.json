@@ -1,0 +1,206 @@
+{
+ "label": "cold",
+ "state": {
+  "email": "bench-6242109879b8@example.com",
+  "organization_id": "ce0cc255-b29f-4d2a-9bf2-7199f5cae8ae"
+ },
+ "api_latency": [
+  {
+   "name": "GET /health",
+   "requests": 2000,
+   "concurrency": 20,
+   "expected_status": 200,
+   "statuses": {
+    "200": 2000
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 133.2,
+   "mean_ms": 149.44,
+   "p50_ms": 93.11,
+   "p95_ms": 442.48,
+   "p99_ms": 834.32,
+   "max_ms": 1308.06
+  },
+  {
+   "name": "GET /readiness",
+   "requests": 500,
+   "concurrency": 10,
+   "expected_status": 200,
+   "statuses": {
+    "200": 500
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 141.2,
+   "mean_ms": 70.46,
+   "p50_ms": 66.94,
+   "p95_ms": 108.01,
+   "p99_ms": 124.26,
+   "max_ms": 135.72
+  },
+  {
+   "name": "POST /auth/login (correct)",
+   "requests": 100,
+   "concurrency": 4,
+   "expected_status": 200,
+   "statuses": {
+    "200": 100
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 16.7,
+   "mean_ms": 236.28,
+   "p50_ms": 238.23,
+   "p95_ms": 270.75,
+   "p99_ms": 278.76,
+   "max_ms": 300.84
+  },
+  {
+   "name": "POST /auth/login (wrong password)",
+   "requests": 100,
+   "concurrency": 4,
+   "expected_status": 401,
+   "statuses": {
+    "401": 100
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 16.6,
+   "mean_ms": 239.16,
+   "p50_ms": 234.63,
+   "p95_ms": 289.14,
+   "p99_ms": 312.71,
+   "max_ms": 315.88
+  },
+  {
+   "name": "GET /documents",
+   "requests": 500,
+   "concurrency": 10,
+   "expected_status": 200,
+   "statuses": {
+    "200": 500
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 123.1,
+   "mean_ms": 80.65,
+   "p50_ms": 68.29,
+   "p95_ms": 147.69,
+   "p99_ms": 218.03,
+   "max_ms": 343.91
+  },
+  {
+   "name": "POST /retrieval/debug (hybrid)",
+   "requests": 200,
+   "concurrency": 4,
+   "expected_status": 200,
+   "statuses": {
+    "200": 200
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 29.7,
+   "mean_ms": 134.16,
+   "p50_ms": 130.01,
+   "p95_ms": 178.48,
+   "p99_ms": 203.42,
+   "max_ms": 232.57
+  }
+ ],
+ "redis": {
+  "PING": {
+   "samples": 1000,
+   "mean_ms": 0.14,
+   "p50_ms": 0.11,
+   "p95_ms": 0.28,
+   "p99_ms": 0.35,
+   "max_ms": 9.67
+  },
+  "INCR": {
+   "samples": 1000,
+   "mean_ms": 0.14,
+   "p50_ms": 0.12,
+   "p95_ms": 0.24,
+   "p99_ms": 0.31,
+   "max_ms": 0.89
+  }
+ },
+ "database": {
+  "document_list": {
+   "repeats": 7,
+   "median_execution_ms": 0.034,
+   "rows_returned": 20,
+   "scan_nodes": [
+    "Seq Scan on documents"
+   ]
+  },
+  "keyword_search": {
+   "repeats": 7,
+   "median_execution_ms": 0.856,
+   "rows_returned": 20,
+   "scan_nodes": [
+    "Seq Scan on document_chunks",
+    "Seq Scan on documents"
+   ]
+  },
+  "vector_search": {
+   "repeats": 7,
+   "median_execution_ms": 0.079,
+   "rows_returned": 8,
+   "scan_nodes": [
+    "Index Scan on documents_pkey",
+    "Index Scan on ix_document_chunks_embedding_cosine"
+   ]
+  },
+  "row_counts": {
+   "documents": 23,
+   "document_chunks": 683
+  }
+ },
+ "vector_retrieval": {
+  "queries": 20,
+  "top_k": 30,
+  "rows_mean": 6.85,
+  "rows_min": 3,
+  "recall_mean": 0.022,
+  "recall_min": 0.0,
+  "mean_ms": 1.01,
+  "p50_ms": 0.61,
+  "p95_ms": 1.14,
+  "p99_ms": 8.19,
+  "max_ms": 8.19
+ },
+ "resources": {
+  "backend": {
+   "samples": 6,
+   "cpu_percent_mean": 150.8,
+   "cpu_percent_max": 302.2,
+   "mem_mb_max": 212.4
+  },
+  "minio": {
+   "samples": 6,
+   "cpu_percent_mean": 0.5,
+   "cpu_percent_max": 2.5,
+   "mem_mb_max": 88.1
+  },
+  "postgres": {
+   "samples": 6,
+   "cpu_percent_mean": 8.0,
+   "cpu_percent_max": 21.3,
+   "mem_mb_max": 90.4
+  },
+  "redis": {
+   "samples": 6,
+   "cpu_percent_mean": 1.9,
+   "cpu_percent_max": 5.5,
+   "mem_mb_max": 4.0
+  },
+  "stub-ai": {
+   "samples": 6,
+   "cpu_percent_mean": 5.6,
+   "cpu_percent_max": 18.0,
+   "mem_mb_max": 17.4
+  },
+  "worker": {
+   "samples": 6,
+   "cpu_percent_mean": 4.4,
+   "cpu_percent_max": 25.7,
+   "mem_mb_max": 179.4
+  }
+ }
+}

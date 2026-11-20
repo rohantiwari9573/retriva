@@ -12,12 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 FROM base AS deps
-COPY pyproject.toml ./
+COPY pyproject.toml constraints.txt ./
 COPY app ./app
-RUN pip install --upgrade pip && pip install .
+# constraints.txt pins every dependency, so a rebuild installs the tested versions.
+RUN pip install -c constraints.txt --upgrade pip && pip install -c constraints.txt .
 
 FROM deps AS dev-deps
-RUN pip install ".[dev]"
+RUN pip install -c constraints.txt ".[dev]"
 
 FROM base AS runtime
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

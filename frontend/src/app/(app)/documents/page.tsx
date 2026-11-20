@@ -37,6 +37,7 @@ import {
 import { ApiError } from "@/lib/api-client";
 import { formatFileSize } from "@/lib/format";
 import { ROLE_HIERARCHY, type Document } from "@/lib/types";
+import { uploadSizeError } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 
 const ACCEPTED_EXTENSIONS = ".pdf,.docx,.txt,.md";
@@ -53,6 +54,11 @@ export default function DocumentsPage() {
   const canDelete = organization ? ROLE_HIERARCHY[organization.role] >= ROLE_HIERARCHY.ADMIN : false;
 
   const doUpload = (file: File) => {
+    const sizeError = uploadSizeError(file);
+    if (sizeError) {
+      toast.error(`${file.name}: ${sizeError}`);
+      return;
+    }
     uploadDocument.mutate(file, {
       onSuccess: () => toast.success(`${file.name} uploaded - processing has started.`),
       onError: (error) => {

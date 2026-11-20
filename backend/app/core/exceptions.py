@@ -75,6 +75,11 @@ class RateLimitedError(AppError):
     code = "RATE_LIMITED"
 
 
+class RateLimiterUnavailableError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "RATE_LIMITER_UNAVAILABLE"
+
+
 class PayloadTooLargeError(AppError):
     status_code = status.HTTP_413_CONTENT_TOO_LARGE
     code = "FILE_TOO_LARGE"

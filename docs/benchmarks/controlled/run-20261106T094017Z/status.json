@@ -1,0 +1,5 @@
+{
+ "completed": ["round1-old"],
+ "partial": ["round1-r0: ingestion only"],
+ "stopped_early": "Stopped by Claude Code at about 15:14 IST for low memory. The process was killed, so this file was written by hand afterwards. Resource fields are empty because of a runner bug, since fixed."
+}

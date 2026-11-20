@@ -1,0 +1,206 @@
+{
+ "label": "warm",
+ "state": {
+  "email": "bench-f74e9cd3b185@example.com",
+  "organization_id": "3241b516-afef-4357-95dd-a85af1767892"
+ },
+ "api_latency": [
+  {
+   "name": "GET /health",
+   "requests": 2000,
+   "concurrency": 20,
+   "expected_status": 200,
+   "statuses": {
+    "200": 2000
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 113.8,
+   "mean_ms": 175.06,
+   "p50_ms": 112.12,
+   "p95_ms": 570.15,
+   "p99_ms": 910.71,
+   "max_ms": 1531.67
+  },
+  {
+   "name": "GET /readiness",
+   "requests": 500,
+   "concurrency": 10,
+   "expected_status": 200,
+   "statuses": {
+    "200": 500
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 119.0,
+   "mean_ms": 83.7,
+   "p50_ms": 74.47,
+   "p95_ms": 141.55,
+   "p99_ms": 271.49,
+   "max_ms": 318.73
+  },
+  {
+   "name": "POST /auth/login (correct)",
+   "requests": 100,
+   "concurrency": 4,
+   "expected_status": 200,
+   "statuses": {
+    "200": 100
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 16.9,
+   "mean_ms": 233.46,
+   "p50_ms": 233.03,
+   "p95_ms": 285.8,
+   "p99_ms": 323.41,
+   "max_ms": 359.15
+  },
+  {
+   "name": "POST /auth/login (wrong password)",
+   "requests": 100,
+   "concurrency": 4,
+   "expected_status": 401,
+   "statuses": {
+    "401": 100
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 16.8,
+   "mean_ms": 235.98,
+   "p50_ms": 223.02,
+   "p95_ms": 300.71,
+   "p99_ms": 324.51,
+   "max_ms": 325.27
+  },
+  {
+   "name": "GET /documents",
+   "requests": 500,
+   "concurrency": 10,
+   "expected_status": 200,
+   "statuses": {
+    "200": 500
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 102.3,
+   "mean_ms": 97.43,
+   "p50_ms": 90.53,
+   "p95_ms": 188.2,
+   "p99_ms": 275.78,
+   "max_ms": 315.42
+  },
+  {
+   "name": "POST /retrieval/debug (hybrid)",
+   "requests": 200,
+   "concurrency": 4,
+   "expected_status": 200,
+   "statuses": {
+    "200": 200
+   },
+   "error_rate": 0.0,
+   "requests_per_second": 29.6,
+   "mean_ms": 134.37,
+   "p50_ms": 128.54,
+   "p95_ms": 179.07,
+   "p99_ms": 227.47,
+   "max_ms": 244.17
+  }
+ ],
+ "redis": {
+  "PING": {
+   "samples": 1000,
+   "mean_ms": 0.19,
+   "p50_ms": 0.13,
+   "p95_ms": 0.39,
+   "p99_ms": 0.73,
+   "max_ms": 9.91
+  },
+  "INCR": {
+   "samples": 1000,
+   "mean_ms": 0.14,
+   "p50_ms": 0.08,
+   "p95_ms": 0.3,
+   "p99_ms": 0.51,
+   "max_ms": 1.78
+  }
+ },
+ "database": {
+  "document_list": {
+   "repeats": 7,
+   "median_execution_ms": 0.024,
+   "rows_returned": 20,
+   "scan_nodes": [
+    "Seq Scan on documents"
+   ]
+  },
+  "keyword_search": {
+   "repeats": 7,
+   "median_execution_ms": 0.92,
+   "rows_returned": 20,
+   "scan_nodes": [
+    "Seq Scan on document_chunks",
+    "Seq Scan on documents"
+   ]
+  },
+  "vector_search": {
+   "repeats": 7,
+   "median_execution_ms": 0.067,
+   "rows_returned": 5,
+   "scan_nodes": [
+    "Index Scan on documents_pkey",
+    "Index Scan on ix_document_chunks_embedding_cosine"
+   ]
+  },
+  "row_counts": {
+   "documents": 23,
+   "document_chunks": 683
+  }
+ },
+ "vector_retrieval": {
+  "queries": 20,
+  "top_k": 30,
+  "rows_mean": 7.3,
+  "rows_min": 2,
+  "recall_mean": 0.015,
+  "recall_min": 0.0,
+  "mean_ms": 1.25,
+  "p50_ms": 0.82,
+  "p95_ms": 2.14,
+  "p99_ms": 7.96,
+  "max_ms": 7.96
+ },
+ "resources": {
+  "backend": {
+   "samples": 7,
+   "cpu_percent_mean": 120.5,
+   "cpu_percent_max": 297.4,
+   "mem_mb_max": 219.6
+  },
+  "minio": {
+   "samples": 7,
+   "cpu_percent_mean": 0.7,
+   "cpu_percent_max": 2.5,
+   "mem_mb_max": 80.1
+  },
+  "postgres": {
+   "samples": 7,
+   "cpu_percent_mean": 5.0,
+   "cpu_percent_max": 16.3,
+   "mem_mb_max": 95.1
+  },
+  "redis": {
+   "samples": 7,
+   "cpu_percent_mean": 2.0,
+   "cpu_percent_max": 3.4,
+   "mem_mb_max": 4.0
+  },
+  "stub-ai": {
+   "samples": 7,
+   "cpu_percent_mean": 4.8,
+   "cpu_percent_max": 11.5,
+   "mem_mb_max": 18.0
+  },
+  "worker": {
+   "samples": 7,
+   "cpu_percent_mean": 11.2,
+   "cpu_percent_max": 77.7,
+   "mem_mb_max": 227.7
+  }
+ }
+}

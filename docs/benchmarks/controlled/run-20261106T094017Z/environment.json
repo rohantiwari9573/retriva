@@ -1,0 +1,17 @@
+{
+ "started_at": "2026-11-06T09:40:17.081806+00:00",
+ "host": {
+  "platform": "Windows-11-10.0.26300-SP0",
+  "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+  "cpu_count": 12,
+  "free_memory_gb_at_start": 2.13
+ },
+ "docker": "29.4.0",
+ "docker_vm": "12 cpus, 8167575552 bytes",
+ "other_containers": [],
+ "variants": {
+  "old": "a04ad3fefdd985f12b1f78646d48c33c1953687a",
+  "r0": "76b1b20db622cff2b8172fb1a5bfc4c4432c05fc",
+  "r0vector": "748e0358c5102ba3fc350f0889f4ecb779141121"
+ }
+}
