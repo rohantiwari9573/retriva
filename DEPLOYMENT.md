@@ -168,6 +168,42 @@ Exit code 0 (`migration_nothing_to_do`) means it is safe to merge. Exit code 4
 a revision this code doesn't know, so stop and find out why. Don't rely on a fixed
 revision: it changes as migrations are added.
 
+### Releasing to production (state as of 2026-11-20)
+
+Production runs `922b0a2` (Render `retriva-api`), database revision `b4f2c81d9e37`.
+`master` is ahead by PRs #1, #4, #5, #6 and #7. Nothing deploys by itself: Render
+auto-deploy for `retriva-api` is **Off**, and the Vercel project's Ignored Build
+Step is "Only build pre-production", so pushes to `master` produce cancelled
+production deployments. Steps, all done by hand:
+
+1. Make a Neon backup branch of production.
+2. `python -m scripts.migrate --check` against production: expect exit **4**,
+   pending `c7a3e5d10b42` (additive: lease columns and a partial index,
+   `lock_timeout` 5 s).
+3. `python -m scripts.migrate`: expect exit 0 (a re-run is a no-op, also 0).
+4. Render → `retriva-api` → Manual Deploy → the `master` commit.
+5. Check `/health` (`{"status":"ok"}`) and `/readiness` (`"schema": "current"`,
+   nothing degraded). Then register, immediately open the dashboard, and upload a
+   small PDF (READY), using a test account.
+6. Frontend: set the Vercel Ignored Build Step back to "Automatic", then redeploy
+   the `master` commit to Production. Don't promote a Preview build: it carries
+   Preview environment variables.
+
+Rollback, verified on a disposable database at schema `c7a3e5d10b42`:
+- **Back to `922b0a2`:** it has no schema check, and its ORM reads and writes
+  normally; new rows get `processing_attempts = 0`. Nothing else to set.
+- **Back to a build with the startup schema check but without PR #4:** it starts
+  and serves with `/readiness` showing `"schema": "unknown_revision"` (degraded),
+  and its migration step exits 6. Set
+  `SCHEMA_ACCEPT_NEWER_REVISIONS=c7a3e5d10b42`: readiness then shows
+  `accepted_newer`, and the step exits 0.
+- **Don't downgrade the schema.** `alembic downgrade b4f2c81d9e37` does cleanly
+  remove the three lease columns and the index (verified), but only run it once
+  pre-PR #4 code is already live.
+- Avoid running old and new workers side by side. The sweep re-queues rows
+  without a heartbeat, and an old worker's whole-job `FOR UPDATE` lock would make
+  that update wait.
+
 ### Client IP behind Vercel
 
 Without this, all website visitors share one login limit and one registration limit,

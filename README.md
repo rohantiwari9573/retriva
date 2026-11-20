@@ -198,7 +198,8 @@ docs/            architecture, RAG, retrieval, security, observability, evaluati
 - Scanned PDFs without a text layer can't be processed, since there is no OCR.
 - Every member of an organization can see all of its documents. There are no per-document ACLs.
 - Rate limiting uses a fixed window on a single Redis instance. If Redis is unavailable each API process enforces limits on its own, so they aren't global until Redis returns.
-- Vector search can return fewer results than requested, because of how the IVFFlat index is built. See [ARCHITECTURE.md](ARCHITECTURE.md#known-defects-not-yet-fixed).
+- A document that needs more than 224 MiB or 120 CPU-seconds to parse fails rather than being processed (the bound that keeps a 512 MB instance alive). See [docs/document-ingestion.md](docs/document-ingestion.md).
+- Open issues found by the final review are listed in [ARCHITECTURE.md](ARCHITECTURE.md#known-defects).
 - Some internal identifiers (cookie names, Compose project, Celery app name) still use the project's original working name, `nexus`. Renaming them would invalidate live sessions.
 
 ## License
