@@ -39,6 +39,7 @@ from app.ingestion.normalization import normalize_text
 from app.ingestion.parsers.base import ParsedDocument
 
 _CHARS_PER_TOKEN = 4
+MAX_SECTION_CHARS = 500  # document_chunks.section is VARCHAR(500)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -176,7 +177,9 @@ def chunk_document(
                 chunk_index=len(chunks),
                 content=content,
                 page_number=first.page_number,
-                section=first.section,
+                # The column is VARCHAR(500); a longer heading (or Markdown
+                # "H1 > H2 > ..." path) would otherwise fail the whole document.
+                section=first.section[:MAX_SECTION_CHARS] if first.section else first.section,
                 char_count=len(content),
                 token_count=sum(u.token_count for u in current),
                 content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),

@@ -9,7 +9,7 @@ extension or Content-Type header alone - both are attacker-controlled.
 
 import codecs
 import io
-import zipfile
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import BinaryIO
@@ -31,21 +31,75 @@ def _is_pdf(file: BinaryIO) -> bool:
     return file.read(5) == b"%PDF-"
 
 
+# A real DOCX has tens to a few hundred entries and a central directory of a few
+# KiB. This runs in the API process on every upload, so it must be bounded:
+# zipfile.ZipFile builds a ZipInfo object per entry, and a 25 MB archive of
+# nothing but ~500k directory entries took the API from 113 to 374 MiB per
+# upload (two at once OOM-killed a 512 MB instance).
+_MAX_ZIP_ENTRIES = 10_000
+_MAX_ZIP_DIRECTORY_BYTES = 2 * 1024 * 1024
+_EOCD = b"PK\x05\x06"
+_ZIP64_EOCD_LOCATOR = b"PK\x06\x07"
+_ZIP64_EOCD = b"PK\x06\x06"
+_CENTRAL_HEADER = b"PK\x01\x02"
+
+
+def _central_directory(file: BinaryIO) -> bytes | None:
+    """The archive's central directory, read with bounded memory, or None if it is
+    malformed or larger than a document could need."""
+    file.seek(0, 2)
+    size = file.tell()
+    tail_length = min(size, 22 + 0xFFFF)  # EOCD record + the longest possible comment
+    file.seek(size - tail_length)
+    tail = file.read(tail_length)
+    at = tail.rfind(_EOCD)
+    if at < 0 or len(tail) - at < 22:
+        return None
+    _, _, _, _, entries, directory_size, directory_offset, _ = struct.unpack(
+        "<4sHHHHIIH", tail[at : at + 22]
+    )
+    if entries == 0xFFFF or directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
+        locator = at - 20
+        if locator < 0 or tail[locator : locator + 4] != _ZIP64_EOCD_LOCATOR:
+            return None
+        zip64_offset = struct.unpack("<Q", tail[locator + 8 : locator + 16])[0]
+        file.seek(zip64_offset)
+        record = file.read(56)
+        if len(record) < 56 or record[:4] != _ZIP64_EOCD:
+            return None
+        entries, directory_size, directory_offset = struct.unpack("<QQQ", record[32:56])
+    if entries > _MAX_ZIP_ENTRIES or directory_size > _MAX_ZIP_DIRECTORY_BYTES:
+        return None
+    file.seek(directory_offset)
+    directory = file.read(directory_size)
+    return directory if len(directory) == directory_size else None
+
+
+def _zip_has_entry(directory: bytes, wanted: bytes) -> bool:
+    at = 0
+    while at + 46 <= len(directory):
+        if directory[at : at + 4] != _CENTRAL_HEADER:
+            return False
+        name_length, extra_length, comment_length = struct.unpack(
+            "<HHH", directory[at + 28 : at + 34]
+        )
+        if directory[at + 46 : at + 46 + name_length] == wanted:
+            return True
+        at += 46 + name_length + extra_length + comment_length
+    return False
+
+
 def _is_docx(file: BinaryIO) -> bool:
     # DOCX is a ZIP archive with a specific internal layout - checking just
     # the "PK\x03\x04" local-file-header signature would also match plain
     # .zip, .xlsx, .pptx, etc., so confirm a docx-specific entry exists too.
-    # zipfile reads only the central directory from the (seekable) file.
+    # The central directory is read directly (bounded; see above), never
+    # through zipfile, which would materialise every entry.
     file.seek(0)
     if file.read(4) != b"PK\x03\x04":
         return False
-    file.seek(0)
-    try:
-        with zipfile.ZipFile(file) as archive:
-            names = archive.namelist()
-    except zipfile.BadZipFile:
-        return False
-    return "word/document.xml" in names
+    directory = _central_directory(file)
+    return directory is not None and _zip_has_entry(directory, b"word/document.xml")
 
 
 def _is_text(file: BinaryIO) -> bool:

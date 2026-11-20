@@ -449,3 +449,10 @@ async def test_output_over_the_file_size_limit_fails_permanently(tmp_path, monke
     with pytest.raises(ParsingError) as info:
         await isolated.parse_and_chunk(path, "text/plain", str(tmp_path))
     assert str(info.value) == isolated.OUTPUT_LIMIT_REASON
+
+
+def test_only_the_exception_type_from_the_child_is_logged():
+    """The child's stderr can quote document content; only the class is kept."""
+    tail = 'Traceback (most recent call last):\n  File "x"\nValueError: secret doc text\n'
+    assert isolated._error_type(tail) == "ValueError"
+    assert isolated._error_type("no traceback here") is None

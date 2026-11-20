@@ -228,3 +228,14 @@ def test_the_chunk_limit_stops_early_with_a_clear_error():
         chunk_document(document, chunk_size_tokens=1, chunk_overlap_tokens=0, max_chunks=10)
     exact = chunk_document(document, chunk_size_tokens=1, chunk_overlap_tokens=0, max_chunks=1000)
     assert len(exact) == 1000
+
+
+def test_a_section_longer_than_the_column_is_truncated():
+    """document_chunks.section is VARCHAR(500): a longer heading path used to
+    fail the whole document at insert time."""
+    from app.ingestion.chunking import MAX_SECTION_CHARS
+
+    heading = "H" * 2000
+    document = ParsedDocument(elements=[ParsedElement(text="Body text.", section=heading)])
+    chunks = chunk_document(document, chunk_size_tokens=100, chunk_overlap_tokens=10)
+    assert chunks[0].section == heading[:MAX_SECTION_CHARS]

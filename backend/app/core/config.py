@@ -137,14 +137,16 @@ class Settings(BaseSettings):
     PDF_MAX_DECOMPRESSED_STREAM_BYTES: int = 10_000_000
     # Parsing and chunking run in a child process limited to this much data
     # memory and this long (app/ingestion/isolated.py): a crafted file can only
-    # kill the child, and fails permanently with a clear reason. The API/worker
-    # process's memory is never at risk from parser behaviour.
+    # kill the child, and fails permanently with a clear reason. (Upload
+    # validation, which runs in the API, reads DOCX archives with bounded memory:
+    # app/services/file_validation.py.)
     DOCUMENT_PARSE_ISOLATION: bool = True
     DOCUMENT_PARSE_MEMORY_LIMIT_MB: int = Field(default=224, ge=64)
     # CPU seconds a document may spend parsing (RLIMIT_CPU in the child): its
     # own cost, independent of how busy the instance is. Exceeding it is permanent.
     DOCUMENT_PARSE_TIMEOUT_SECONDS: int = Field(default=120, ge=5)
-    # Wall-clock backstop (a starved or blocked child); exceeding it is transient.
+    # Wall-clock backstop (a starved or blocked child): transient, unless the child
+    # had already used half its CPU budget, which counts as the CPU limit.
     DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS: int = Field(default=900, ge=10)
     RETRIEVAL_TOP_K: int = 8
     RETRIEVAL_CANDIDATE_POOL: int = 30

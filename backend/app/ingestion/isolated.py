@@ -39,6 +39,7 @@ import asyncio
 import errno
 import json
 import os
+import re
 import signal
 import sys
 from dataclasses import asdict
@@ -172,11 +173,21 @@ async def parse_and_chunk(path: str, mime_type: str, workdir: str) -> list[Chunk
     if "MemoryError" in tail:
         raise ParsingError(MEMORY_LIMIT_REASON)
     logger.warning(
-        "document_parser_exited_without_result", returncode=code, stderr_tail=tail[-500:]
+        "document_parser_exited_without_result", returncode=code, error=_error_type(tail)
     )
     raise TransientProcessingError(
         f"The document parser stopped unexpectedly (exit {code}); it will be retried."
     )
+
+
+def _error_type(stderr_tail: str) -> str | None:
+    """The exception class from a traceback's last line, without its message,
+    which can quote document content."""
+    for line in reversed(stderr_tail.strip().splitlines()):
+        match = re.match(r"([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt))\b", line.strip())
+        if match:
+            return match.group(1)
+    return None
 
 
 def _cpu_seconds(pid: int) -> float | None:

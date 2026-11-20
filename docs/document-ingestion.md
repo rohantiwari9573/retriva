@@ -97,7 +97,8 @@ How an outcome is classified:
 |---|---|
 | Parse error, too much text, memory limit reached, CPU limit reached, output too large | **Permanent:** the document itself is the cause, and it fails with a clear reason |
 | Killed from outside, e.g. by the kernel when the whole instance ran short of memory | **Transient:** the attempt limit bounds the retries |
-| Wall-clock backstop, `DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS` (default 900) | **Transient** |
+| Wall-clock backstop, `DOCUMENT_PARSE_WALL_TIMEOUT_SECONDS` (default 900), when the child has used less than half its CPU budget (a starved instance) | **Transient** |
+| The same backstop after the child used at least half its CPU budget (on a fractional-CPU instance the backstop fires before the CPU limit) | **Permanent** (time limit) |
 | Crash, disk full, limits that could not be set | **Transient** |
 
 A memory overrun is recognised however the C library reports it: a
@@ -114,6 +115,13 @@ Separately from isolation:
 development only, because it removes the bounds. The limits are enforced on
 Linux. Windows has no rlimits, and macOS doesn't enforce `RLIMIT_DATA`, so the
 child runs uncapped there.
+
+**Upload validation** runs in the API process, before anything is stored, so it
+is bounded too. A DOCX is checked by reading the archive's end-of-central-directory
+record (zip64 included) and its central directory, which may be at most 2 MiB and
+10,000 entries, never through `zipfile.ZipFile`. A 25 MB archive made of half a
+million directory entries took the API from 113 to 374 MiB per upload, and two at
+once OOM-killed a 512 MB instance. PDF and text checks read at most 1 MiB at a time.
 
 **Per process:** inline mode runs at most `DOCUMENT_PROCESSING_CONCURRENCY`
 documents at once (default 1) on a dedicated executor; others wait in memory,

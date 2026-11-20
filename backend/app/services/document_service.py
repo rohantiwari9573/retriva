@@ -142,8 +142,11 @@ class DocumentService:
             raise ConflictError(
                 "Only a failed document can be retried.", code="INVALID_STATUS_TRANSITION"
             )
-        await self.db.commit()
         await self.db.refresh(document)
+        # Commit after the refresh, so no transaction is left open (holding a
+        # pooled connection) while dispatch publishes: in Celery mode with Redis
+        # down that publish can block for minutes.
+        await self.db.commit()
 
         await self._enqueue_processing(document)
         return document

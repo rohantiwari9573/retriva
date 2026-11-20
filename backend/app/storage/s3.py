@@ -203,11 +203,13 @@ class S3StorageProvider:
         first real upload will surface the problem clearly anyway."""
         try:
             self._client.head_bucket(Bucket=self._bucket)
+        except BotoCoreError as exc:  # endpoint unreachable, timeout, bad config
+            logger.warning("storage_bucket_ensure_failed", exc_info=exc)
         except ClientError:
             try:
                 self._client.create_bucket(Bucket=self._bucket)
                 logger.info("storage_bucket_created", bucket=self._bucket)
-            except ClientError as exc:
+            except (ClientError, BotoCoreError) as exc:
                 logger.warning("storage_bucket_ensure_failed", exc_info=exc)
 
 
