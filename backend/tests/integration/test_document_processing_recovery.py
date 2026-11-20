@@ -487,3 +487,71 @@ async def test_a_parse_longer_than_the_lease_keeps_its_lease(
     assert document.status == DocumentStatus.READY
     assert document.processing_attempts == 1
     assert len(await _chunks(document_id)) == document.chunk_count
+
+
+async def test_a_failure_after_some_chunks_were_inserted_leaves_no_partial_result(
+    fake_storage, org, providers, monkeypatch
+):
+    """The process dies (here: the connection drops) after the first batch of
+    chunks was inserted but before READY: the chunk inserts and the status change
+    are one transaction, so nothing is kept, and the retry writes one clean set."""
+    from app.ingestion import pipeline
+
+    monkeypatch.setattr(settings, "DOCUMENT_INSERT_BATCH_SIZE", 1)
+    monkeypatch.setattr(settings, "CHUNK_SIZE_TOKENS", 12)  # one chunk per paragraph
+    monkeypatch.setattr(settings, "CHUNK_OVERLAP_TOKENS", 0)
+    real_insert = pipeline.insert
+    calls = {"n": 0}
+
+    def failing_insert(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the first batch is already in the transaction
+            raise ConnectionResetError("connection dropped mid-transaction")
+        return real_insert(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "insert", failing_insert)
+    document_id = await _make_document(fake_storage, *org)
+
+    first = await asyncio.to_thread(runner.run_attempt, str(document_id))
+
+    assert first.kind == runner.AttemptKind.RETRY
+    assert await _chunks(document_id) == []
+    document = await _fetch(document_id)
+    assert document.status == DocumentStatus.PROCESSING
+    assert document.processing_token is None  # released, not held by a dead attempt
+
+    monkeypatch.setattr(pipeline, "insert", real_insert)
+    second = await asyncio.to_thread(runner.run_attempt, str(document_id))
+
+    assert second.kind == runner.AttemptKind.DONE
+    document = await _fetch(document_id)
+    chunks = await _chunks(document_id)
+    assert document.status == DocumentStatus.READY
+    assert sorted(c.chunk_index for c in chunks) == list(range(document.chunk_count))
+    assert document.processing_attempts == 2
+
+
+async def test_a_sweep_racing_a_live_worker_changes_nothing(fake_storage, org, monkeypatch):
+    """The periodic sweep runs while a worker is mid-way (live lease): it must
+    neither re-queue nor fail the document, and the worker finishes once."""
+    slow = _SlowProvider(dimensions=settings.EMBEDDING_DIMENSIONS)
+    monkeypatch.setattr(runner, "get_storage_provider", lambda: fake_storage)
+    monkeypatch.setattr(runner, "get_embedding_provider", lambda: slow)
+    monkeypatch.setattr(settings, "DOCUMENT_PROCESSING_QUEUE_STALE_SECONDS", 0)
+    document_id = await _make_document(fake_storage, *org)
+
+    worker = asyncio.create_task(asyncio.to_thread(runner.run_attempt, str(document_id)))
+    for _ in range(100):  # until the worker holds the lease
+        if (await _fetch(document_id)).processing_token is not None:
+            break
+        await asyncio.sleep(0.02)
+    async with _factory() as session_factory:
+        swept = [await lease.sweep(session_factory, queue_stale_seconds=0) for _ in range(3)]
+    result = await worker
+
+    assert all(document_id not in s.requeued + s.failed for s in swept)
+    assert result.kind == runner.AttemptKind.DONE
+    document = await _fetch(document_id)
+    assert document.status == DocumentStatus.READY
+    assert document.processing_attempts == 1
+    assert len(await _chunks(document_id)) == document.chunk_count

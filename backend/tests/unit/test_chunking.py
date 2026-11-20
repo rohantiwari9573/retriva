@@ -1,3 +1,5 @@
+import pytest
+
 from app.ingestion.chunking import chunk_document, estimate_token_count
 from app.ingestion.parsers.base import ParsedDocument, ParsedElement
 
@@ -174,3 +176,55 @@ def test_a_sentence_larger_than_the_chunk_size_is_window_split():
     )
     assert max(c.char_count for c in chunks) <= 500 * 4 + 10
     assert "".join(c.content for c in chunks).replace("\n\n", "").count("x") >= 50_000
+
+
+def _check_invariants(chunks, document, size):
+    # Never above the target size (every unit is split to fit), never empty, and
+    # no text lost: every word of every paragraph appears in some chunk.
+    assert all(0 < c.token_count <= size for c in chunks)
+    # A word longer than the window (size * 4 characters, the token estimate) is
+    # window-split, so check it piece by piece; the last piece can straddle the
+    # next word, so only full-window pieces are checked for those.
+    joined = "\n\n".join(c.content for c in chunks)
+    window = size * 4
+    for element in document.elements:
+        for word in element.text.split():
+            if len(word) <= window:
+                assert word in joined
+            else:
+                assert all(
+                    word[i : i + window] in joined for i in range(0, len(word) - window + 1, window)
+                )
+    assert [c.chunk_index for c in chunks] == list(range(len(chunks)))
+
+
+@pytest.mark.parametrize(
+    ("name", "paragraphs", "size", "overlap"),
+    [
+        ("exactly the limit", ["a" * 400, "b" * 400], 100, 20),
+        ("one char above the limit", ["a" * 401, "b" * 10], 100, 20),
+        ("overlap larger than the next paragraph", ["x" * 60, "y" * 360, "z" * 8], 100, 90),
+        ("overlap equal to the size", ["p" * 40, "q" * 400, "r" * 40], 100, 100),
+        ("empty and blank paragraphs", ["", "   ", "real text here.", "\n\n", "more."], 50, 10),
+        ("multi-byte text", ["日本語のテキスト。" * 60, "😀 émoji ünïcode. " * 40], 50, 10),
+        ("many tiny paragraphs", ["w"] * 5000, 10, 3),
+    ],
+)
+def test_chunking_edge_cases_terminate_and_keep_their_invariants(name, paragraphs, size, overlap):
+    document = ParsedDocument(elements=[ParsedElement(text="\n\n".join(paragraphs))])
+    chunks = chunk_document(document, chunk_size_tokens=size, chunk_overlap_tokens=overlap)
+    _check_invariants(chunks, document, size)
+    # Progress: every chunk carries at least one paragraph-unit of new text, so a
+    # document can never produce more chunks than it has units.
+    units = sum(1 for p in "\n\n".join(paragraphs).split("\n\n") if p.strip())
+    assert len(chunks) <= max(units, 1) * (1 + 4 * max(len(p) for p in paragraphs) // size + 1)
+
+
+def test_the_chunk_limit_stops_early_with_a_clear_error():
+    from app.ingestion.errors import PermanentProcessingError
+
+    document = ParsedDocument(elements=[ParsedElement(text="\n\n".join(["word"] * 1000))])
+    with pytest.raises(PermanentProcessingError, match="more than 10 chunks"):
+        chunk_document(document, chunk_size_tokens=1, chunk_overlap_tokens=0, max_chunks=10)
+    exact = chunk_document(document, chunk_size_tokens=1, chunk_overlap_tokens=0, max_chunks=1000)
+    assert len(exact) == 1000
